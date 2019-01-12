@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 #
 # Copyright (C) 2013-15 The CyanogenMod Project
+#           (C) 2017    The LineageOS Project
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -28,6 +29,7 @@ import subprocess
 import re
 import argparse
 import textwrap
+from functools import cmp_to_key
 from xml.etree import ElementTree
 
 try:
@@ -101,7 +103,7 @@ def fetch_query_via_ssh(remote_url, query):
 def fetch_query_via_http(remote_url, query):
 
     """Given a query, fetch the change numbers via http"""
-    url = '{0}/changes/?q={1}&o=CURRENT_REVISION&o=ALL_REVISIONS'.format(remote_url, query)
+    url = '{0}/changes/?q={1}&o=CURRENT_REVISION&o=ALL_REVISIONS&o=ALL_COMMITS'.format(remote_url, query)
     data = urllib.request.urlopen(url).read().decode('utf-8')
     reviews = json.loads(data[5:])
 
@@ -121,12 +123,12 @@ def fetch_query(remote_url, query):
         raise Exception('Gerrit URL should be in the form http[s]://hostname/ or ssh://[user@]host[:port]')
 
 if __name__ == '__main__':
-    # Default to CyanogenMod Gerrit
-    default_gerrit = 'http://review.cyanogenmod.org'
+    # Default to LineageOS Gerrit
+    default_gerrit = 'http://review.lineageos.org'
 
     parser = argparse.ArgumentParser(formatter_class=argparse.RawDescriptionHelpFormatter, description=textwrap.dedent('''\
         repopick.py is a utility to simplify the process of cherry picking
-        patches from CyanogenMod's Gerrit instance (or any gerrit instance of your choosing)
+        patches from LineageOS's Gerrit instance (or any gerrit instance of your choosing)
 
         Given a list of change numbers, repopick will cd into the project path
         and cherry pick the latest patch available.
@@ -234,12 +236,25 @@ if __name__ == '__main__':
     # get data on requested changes
     reviews = []
     change_numbers = []
+
+    def cmp_reviews(review_a, review_b):
+        current_a = review_a['current_revision']
+        parents_a = [r['commit'] for r in review_a['revisions'][current_a]['commit']['parents']]
+        current_b = review_b['current_revision']
+        parents_b = [r['commit'] for r in review_b['revisions'][current_b]['commit']['parents']]
+        if current_a in parents_b:
+            return -1
+        elif current_b in parents_a:
+            return 1
+        else:
+            return cmp(review_a['number'], review_b['number'])
+
     if args.topic:
         reviews = fetch_query(args.gerrit, 'topic:{0}'.format(args.topic))
-        change_numbers = sorted([str(r['number']) for r in reviews])
+        change_numbers = [str(r['number']) for r in sorted(reviews, key=cmp_to_key(cmp_reviews))]
     if args.query:
         reviews = fetch_query(args.gerrit, args.query)
-        change_numbers = sorted([str(r['number']) for r in reviews])
+        change_numbers = [str(r['number']) for r in sorted(reviews, key=cmp_to_key(cmp_reviews))]
     if args.change_number:
         for c in args.change_number:
             if '-' in c:
@@ -396,7 +411,7 @@ if __name__ == '__main__':
                 sys.exit(result)
         # Perform the cherry-pick
         if not args.pull:
-            cmd = ['git cherry-pick FETCH_HEAD']
+            cmd = ['git cherry-pick --ff FETCH_HEAD']
             if args.quiet:
                 cmd_out = open(os.devnull, 'wb')
             else:
