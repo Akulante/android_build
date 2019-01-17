@@ -14,6 +14,7 @@
 # limitations under the License.
 #
 
+$(call record-module-type,DROIDDOC)
 ##
 ##
 ## Common to both droiddoc and javadoc
@@ -23,6 +24,7 @@
 LOCAL_IS_HOST_MODULE := $(call true-or-empty,$(LOCAL_IS_HOST_MODULE))
 ifeq ($(LOCAL_IS_HOST_MODULE),true)
 my_prefix := HOST_
+LOCAL_HOST_PREFIX :=
 else
 my_prefix := TARGET_
 endif
@@ -67,13 +69,16 @@ ifneq ($(LOCAL_SDK_VERSION),)
   else ifeq ($(LOCAL_SDK_VERSION)$(TARGET_BUILD_APPS),system_current)
     LOCAL_JAVA_LIBRARIES := android_system_stubs_current $(LOCAL_JAVA_LIBRARIES)
     $(full_target): PRIVATE_BOOTCLASSPATH := $(call java-lib-files, android_system_stubs_current)
+  else ifeq ($(LOCAL_SDK_VERSION)$(TARGET_BUILD_APPS),test_current)
+    LOCAL_JAVA_LIBRARIES := android_test_stubs_current $(LOCAL_JAVA_LIBRARIES)
+    $(full_target): PRIVATE_BOOTCLASSPATH := $(call java-lib-files, android_test_stubs_current)
   else
     LOCAL_JAVA_LIBRARIES := sdk_v$(LOCAL_SDK_VERSION) $(LOCAL_JAVA_LIBRARIES)
     $(full_target): PRIVATE_BOOTCLASSPATH := $(call java-lib-files, sdk_v$(LOCAL_SDK_VERSION))
   endif
 else
-  LOCAL_JAVA_LIBRARIES := core-libart ext framework $(LOCAL_JAVA_LIBRARIES)
-  $(full_target): PRIVATE_BOOTCLASSPATH := $(call java-lib-files, core-libart)
+  LOCAL_JAVA_LIBRARIES := core-oj core-libart ext framework $(LOCAL_JAVA_LIBRARIES)
+  $(full_target): PRIVATE_BOOTCLASSPATH := $(call java-lib-files, core-oj):$(call java-lib-files, core-libart)
 endif  # LOCAL_SDK_VERSION
 LOCAL_JAVA_LIBRARIES := $(sort $(LOCAL_JAVA_LIBRARIES))
 
@@ -98,6 +103,7 @@ endif
 
 $(full_target): PRIVATE_OUT_DIR := $(out_dir)
 $(full_target): PRIVATE_DROIDDOC_OPTIONS := $(LOCAL_DROIDDOC_OPTIONS)
+$(full_target): PRIVATE_STUB_OUT_DIR := $(LOCAL_DROIDDOC_STUB_OUT_DIR)
 
 # Lists the input files for the doc build into a text file
 # suitable for the @ syntax of javadoc.
@@ -107,7 +113,7 @@ $(full_target): PRIVATE_DROIDDOC_OPTIONS := $(LOCAL_DROIDDOC_OPTIONS)
 define prepare-doc-source-list
 $(hide) mkdir -p $(dir $(1))
 $(call dump-words-to-file, $(2), $(1))
-$(hide) for d in $(3) ; do find $$d -name '*.java' >> $(1) 2> /dev/null ; done ; true
+$(hide) for d in $(3) ; do find $$d -name '*.java' -and -not -name '.*' >> $(1) 2> /dev/null ; done ; true
 endef
 
 ifeq (a,b)
@@ -124,15 +130,21 @@ ifneq ($(strip $(LOCAL_DROIDDOC_USE_STANDARD_DOCLET)),true)
 ##
 
 droiddoc_templates := \
-    $(shell find $(LOCAL_DROIDDOC_CUSTOM_TEMPLATE_DIR) -type f)
+    $(sort $(shell find $(LOCAL_DROIDDOC_CUSTOM_TEMPLATE_DIR) -type f $(if $(ALLOW_MISSING_DEPENDENCIES),2>/dev/null)))
+
+ifdef ALLOW_MISSING_DEPENDENCIES
+  ifndef droiddoc_templates
+    droiddoc_templates := $(LOCAL_DROIDDOC_CUSTOM_TEMPLATE_DIR)
+  endif
+endif
 
 droiddoc := \
 	$(HOST_JDK_TOOLS_JAR) \
 	$(HOST_OUT_JAVA_LIBRARIES)/doclava$(COMMON_JAVA_PACKAGE_SUFFIX)
 
 $(full_target): PRIVATE_DOCLETPATH := $(HOST_OUT_JAVA_LIBRARIES)/jsilver$(COMMON_JAVA_PACKAGE_SUFFIX):$(HOST_OUT_JAVA_LIBRARIES)/doclava$(COMMON_JAVA_PACKAGE_SUFFIX)
-$(full_target): PRIVATE_CURRENT_BUILD := -hdf page.build $(BUILD_ID)-$(BUILD_NUMBER)
-$(full_target): PRIVATE_CURRENT_TIME :=  -hdf page.now "$(shell date "+%d %b %Y %k:%M")"
+$(full_target): PRIVATE_CURRENT_BUILD := -hdf page.build $(BUILD_ID)-$(BUILD_NUMBER_FROM_FILE)
+$(full_target): PRIVATE_CURRENT_TIME :=  -hdf page.now "$$($(DATE_FROM_FILE) "+%d %b %Y %k:%M")"
 $(full_target): PRIVATE_CUSTOM_TEMPLATE_DIR := $(LOCAL_DROIDDOC_CUSTOM_TEMPLATE_DIR)
 $(full_target): PRIVATE_IN_CUSTOM_ASSET_DIR := $(LOCAL_DROIDDOC_CUSTOM_TEMPLATE_DIR)/$(LOCAL_DROIDDOC_CUSTOM_ASSET_DIR)
 $(full_target): PRIVATE_OUT_ASSET_DIR := $(out_dir)/$(LOCAL_DROIDDOC_ASSET_DIR)
@@ -141,7 +153,7 @@ $(full_target): PRIVATE_OUT_CUSTOM_ASSET_DIR := $(out_dir)/$(LOCAL_DROIDDOC_CUST
 html_dir_files :=
 ifneq ($(strip $(LOCAL_DROIDDOC_HTML_DIR)),)
 $(full_target): PRIVATE_DROIDDOC_HTML_DIR := -htmldir $(LOCAL_PATH)/$(LOCAL_DROIDDOC_HTML_DIR)
-html_dir_files := $(shell find $(LOCAL_PATH)/$(LOCAL_DROIDDOC_HTML_DIR) -type f)
+html_dir_files := $(sort $(shell find $(LOCAL_PATH)/$(LOCAL_DROIDDOC_HTML_DIR) -type f))
 else
 $(full_target): PRIVATE_DROIDDOC_HTML_DIR :=
 endif
@@ -154,23 +166,29 @@ endif
 # TODO: not clear if this is used any more
 $(full_target): PRIVATE_LOCAL_PATH := $(LOCAL_PATH)
 
+# TODO(tobiast): Clean this up once we move to -source 1.9.
+# OpenJDK 9 does not have the concept of a "boot classpath" so we should
+# then rename PRIVATE_BOOTCLASSPATH to PRIVATE_MODULE or similar. For now,
+# keep -bootclasspath here since it works in combination with -source 1.8.
 $(full_target): \
         $(full_src_files) \
         $(droiddoc_templates) \
         $(droiddoc) \
         $(html_dir_files) \
         $(full_java_lib_deps) \
-        $(LOCAL_MODULE_MAKEFILE) \
         $(LOCAL_ADDITIONAL_DEPENDENCIES)
 	@echo -e ${CL_YLW}"Docs droiddoc:"${CL_RST}" $(PRIVATE_OUT_DIR)"
 	$(hide) mkdir -p $(dir $@)
+	$(addprefix $(hide) rm -rf ,$(PRIVATE_STUB_OUT_DIR))
 	$(call prepare-doc-source-list,$(PRIVATE_SRC_LIST_FILE),$(PRIVATE_JAVA_FILES), \
 			$(PRIVATE_SOURCE_INTERMEDIATES_DIR) $(PRIVATE_ADDITIONAL_JAVA_DIR))
 	$(hide) ( \
-		javadoc \
+		$(JAVADOC) \
                 -encoding UTF-8 \
+                -source 1.8 \
                 \@$(PRIVATE_SRC_LIST_FILE) \
-                -J-Xmx1280m \
+                -J-Xmx1600m \
+                -J-XX:-OmitStackTraceInFastThrow \
                 -XDignore.symbol.file \
                 $(PRIVATE_PROFILING_OPTIONS) \
                 -quiet \
@@ -185,6 +203,7 @@ $(full_target): \
                 -d $(PRIVATE_OUT_DIR) \
                 $(PRIVATE_CURRENT_BUILD) $(PRIVATE_CURRENT_TIME) \
                 $(PRIVATE_DROIDDOC_OPTIONS) \
+                $(addprefix -stubs ,$(PRIVATE_STUB_OUT_DIR)) \
         && touch -f $@ \
     ) || (rm -rf $(PRIVATE_OUT_DIR) $(PRIVATE_SRC_LIST_FILE); exit 45)
 
@@ -196,21 +215,34 @@ else
 ## standard doclet only
 ##
 ##
+
+ifneq ($(EXPERIMENTAL_USE_OPENJDK9),)
+# For OpenJDK 9 we use --patch-module to define the core libraries code.
+# TODO(tobiast): Reorganize this when adding proper support for OpenJDK 9
+# modules. Here we treat all code in core libraries as being in java.base
+# to work around the OpenJDK 9 module system. http://b/62049770
+$(full_target): PRIVATE_BOOTCLASSPATH_ARG := --patch-module=java.base=$(PRIVATE_BOOTCLASSPATH)
+else
+# For OpenJDK 8 we can use -bootclasspath to define the core libraries code.
+$(full_target): PRIVATE_BOOTCLASSPATH_ARG := $(addprefix -bootclasspath ,$(PRIVATE_BOOTCLASSPATH))
+endif
+
 $(full_target): $(full_src_files) $(full_java_lib_deps)
 	@echo -e ${CL_YLW}"Docs javadoc:"${CL_RST}" $(PRIVATE_OUT_DIR)"
 	@mkdir -p $(dir $@)
 	$(call prepare-doc-source-list,$(PRIVATE_SRC_LIST_FILE),$(PRIVATE_JAVA_FILES), \
 			$(PRIVATE_SOURCE_INTERMEDIATES_DIR) $(PRIVATE_ADDITIONAL_JAVA_DIR))
 	$(hide) ( \
-		javadoc \
+		$(JAVADOC) \
                 -encoding UTF-8 \
                 $(PRIVATE_DROIDDOC_OPTIONS) \
                 \@$(PRIVATE_SRC_LIST_FILE) \
                 -J-Xmx1024m \
                 -XDignore.symbol.file \
+                -Xdoclint:none \
                 $(PRIVATE_PROFILING_OPTIONS) \
                 $(addprefix -classpath ,$(PRIVATE_CLASSPATH)) \
-                $(addprefix -bootclasspath ,$(PRIVATE_BOOTCLASSPATH)) \
+                $(PRIVATE_BOOTCLASSPATH_ARG) \
                 -sourcepath $(PRIVATE_SOURCE_PATH)$(addprefix :,$(PRIVATE_CLASSPATH)) \
                 -d $(PRIVATE_OUT_DIR) \
                 -quiet \
@@ -240,7 +272,7 @@ $(out_zip): $(full_target)
 	@echo -e ${CL_YLW}"Package docs:"${CL_RST}" $@"
 	@rm -f $@
 	@mkdir -p $(dir $@)
-	$(hide) ( F=$$(pwd)/$@ ; cd $(PRIVATE_DOCS_DIR) && zip -rq $$F * )
+	$(hide) ( F=$$(pwd)/$@ ; cd $(PRIVATE_DOCS_DIR) && zip -rqX $$F * )
 
 $(LOCAL_MODULE)-docs.zip : $(out_zip)
 

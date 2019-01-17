@@ -19,10 +19,16 @@
 
 PRODUCT_PACKAGES := \
     CarrierConfig \
+    CarrierDefaultApp \
     Dialer \
     CallLogBackup \
+<<<<<<< HEAD
     InCallUI \
     Mms \
+=======
+    CellBroadcastReceiver \
+    EmergencyInfo \
+>>>>>>> android_build/lineage-15.1
     rild
 
 PRODUCT_COPY_FILES := \

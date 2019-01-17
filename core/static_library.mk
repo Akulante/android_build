@@ -1,9 +1,18 @@
+$(call record-module-type,STATIC_LIBRARY)
 my_prefix := TARGET_
 include $(BUILD_SYSTEM)/multilib.mk
 
 ifndef my_module_multilib
 # libraries default to building for both architecturess
 my_module_multilib := both
+endif
+
+ifeq ($(LOCAL_SDCLANG),true)
+include $(SDCLANG_FLAG_DEFS)
+endif
+
+ifeq ($(LOCAL_SDCLANG_2),true)
+include $(SDCLANG_FLAG_DEFS)
 endif
 
 LOCAL_2ND_ARCH_VAR_PREFIX :=
@@ -23,9 +32,6 @@ ifeq ($(my_module_arch_supported),true)
 OVERRIDE_BUILT_MODULE_PATH :=
 LOCAL_BUILT_MODULE :=
 LOCAL_INSTALLED_MODULE :=
-LOCAL_MODULE_STEM :=
-LOCAL_BUILT_MODULE_STEM :=
-LOCAL_INSTALLED_MODULE_STEM :=
 LOCAL_INTERMEDIATE_TARGETS :=
 
 include $(BUILD_SYSTEM)/static_library_internal.mk
@@ -35,6 +41,18 @@ endif
 LOCAL_2ND_ARCH_VAR_PREFIX :=
 
 endif # TARGET_2ND_ARCH
+
+ifeq ($(LOCAL_SDCLANG),true)
+ifeq ($(LOCAL_SDCLANG_LTO),true)
+include $(SDCLANG_LTO_DEFS)
+endif
+endif
+
+ifeq ($(LOCAL_SDCLANG_2),true)
+ifeq ($(LOCAL_SDCLANG_LTO),true)
+include $(SDCLANG_LTO_DEFS)
+endif
+endif
 
 my_module_arch_supported :=
 

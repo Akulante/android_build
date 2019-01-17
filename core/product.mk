@@ -23,13 +23,21 @@
 # and the .mk suffix) of the product makefile, "<product_name>:" can be
 # omitted.
 
+# Search for AndroidProducts.mks in the given dir.
+# $(1): the path to the dir
+define _search-android-products-files-in-dir
+$(sort $(shell test -d $(1) && find -L $(1) \
+  -maxdepth 6 \
+  -name .git -prune \
+  -o -name AndroidProducts.mk -print))
+endef
+
 #
 # Returns the list of all AndroidProducts.mk files.
 # $(call ) isn't necessary.
 #
 define _find-android-products-files
-$(shell test -d device && find device -maxdepth 6 -name AndroidProducts.mk) \
-  $(shell test -d vendor && find vendor -maxdepth 6 -name AndroidProducts.mk) \
+$(foreach d, device vendor product,$(call _search-android-products-files-in-dir,$(d))) \
   $(SRC_TARGET_DIR)/product/AndroidProducts.mk
 endef
 
@@ -65,7 +73,6 @@ endef
 #
 
 _product_var_list := \
-    PRODUCT_BOOTANIMATION \
     PRODUCT_BUILD_PROP_OVERRIDES \
     PRODUCT_NAME \
     PRODUCT_MODEL \
@@ -84,11 +91,12 @@ _product_var_list := \
     PRODUCT_DEFAULT_PROPERTY_OVERRIDES \
     PRODUCT_CHARACTERISTICS \
     PRODUCT_COPY_FILES \
-    PRODUCT_COPY_FILES_OVERRIDES \
     PRODUCT_OTA_PUBLIC_KEYS \
     PRODUCT_EXTRA_RECOVERY_KEYS \
     PRODUCT_PACKAGE_OVERLAYS \
     DEVICE_PACKAGE_OVERLAYS \
+    PRODUCT_ENFORCE_RRO_EXCLUDED_OVERLAYS \
+    PRODUCT_ENFORCE_RRO_TARGETS \
     PRODUCT_SDK_ATREE_FILES \
     PRODUCT_SDK_ADDON_NAME \
     PRODUCT_SDK_ADDON_COPY_FILES \
@@ -103,17 +111,41 @@ _product_var_list := \
     PRODUCT_SUPPORTS_BOOT_SIGNER \
     PRODUCT_SUPPORTS_VBOOT \
     PRODUCT_SUPPORTS_VERITY \
+    PRODUCT_SUPPORTS_VERITY_FEC \
     PRODUCT_OEM_PROPERTIES \
+    PRODUCT_SYSTEM_DEFAULT_PROPERTIES \
     PRODUCT_SYSTEM_PROPERTY_BLACKLIST \
+    PRODUCT_SYSTEM_SERVER_APPS \
     PRODUCT_SYSTEM_SERVER_JARS \
+    PRODUCT_ALWAYS_PREOPT_EXTRACTED_APK \
+    PRODUCT_DEXPREOPT_SPEED_APPS \
     PRODUCT_VBOOT_SIGNING_KEY \
     PRODUCT_VBOOT_SIGNING_SUBKEY \
     PRODUCT_VERITY_SIGNING_KEY \
     PRODUCT_SYSTEM_VERITY_PARTITION \
     PRODUCT_VENDOR_VERITY_PARTITION \
+    PRODUCT_SYSTEM_SERVER_DEBUG_INFO \
     PRODUCT_DEX_PREOPT_MODULE_CONFIGS \
     PRODUCT_DEX_PREOPT_DEFAULT_FLAGS \
     PRODUCT_DEX_PREOPT_BOOT_FLAGS \
+    PRODUCT_DEX_PREOPT_PROFILE_DIR \
+    PRODUCT_DEX_PREOPT_BOOT_IMAGE_PROFILE_LOCATION \
+    PRODUCT_USE_PROFILE_FOR_BOOT_IMAGE \
+    PRODUCT_SYSTEM_SERVER_COMPILER_FILTER \
+    PRODUCT_SANITIZER_MODULE_CONFIGS \
+    PRODUCT_SYSTEM_BASE_FS_PATH \
+    PRODUCT_VENDOR_BASE_FS_PATH \
+    PRODUCT_SHIPPING_API_LEVEL \
+    VENDOR_PRODUCT_RESTRICT_VENDOR_FILES \
+    VENDOR_EXCEPTION_MODULES \
+    VENDOR_EXCEPTION_PATHS \
+    PRODUCT_ART_TARGET_INCLUDE_DEBUG_BUILD \
+    PRODUCT_ART_USE_READ_BARRIER \
+    PRODUCT_IOT \
+    PRODUCT_SYSTEM_HEADROOM \
+    PRODUCT_MINIMIZE_JAVA_DEBUG_INFO \
+    PRODUCT_INTEGER_OVERFLOW_EXCLUDE_PATHS \
+
 
 
 define dump-product
@@ -134,7 +166,10 @@ endef
 # $(2): Value to append
 #
 define inherit-product_append-var
-  $(eval $(1) := $($(1)) $(INHERIT_TAG)$(strip $(2)))
+  $(if $(findstring ../,$(2)),\
+    $(eval np := $(call normalize-paths,$(2))),\
+    $(eval np := $(strip $(2))))\
+  $(eval $(1) := $($(1)) $(INHERIT_TAG)$(np))
 endef
 
 #
@@ -153,9 +188,12 @@ endef
 # $(1): Product being inherited
 #
 define inherit-product_track-node
+  $(if $(findstring ../,$(1)),\
+    $(eval np := $(call normalize-paths,$(1))),\
+    $(eval np := $(strip $(1))))\
   $(eval inherit_var := \
       PRODUCTS.$(strip $(word 1,$(_include_stack))).INHERITS_FROM) \
-  $(eval $(inherit_var) := $(sort $($(inherit_var)) $(strip $(1)))) \
+  $(eval $(inherit_var) := $(sort $($(inherit_var)) $(np))) \
   $(eval inherit_var:=) \
   $(eval ALL_PRODUCTS := $(sort $(ALL_PRODUCTS) $(word 1,$(_include_stack))))
 endef
@@ -168,6 +206,7 @@ endef
 #  2. Records the inheritance in the .INHERITS_FROM variable
 #  3. Records that we've visited this node, in ALL_PRODUCTS
 #
+
 define inherit-product
   $(foreach v,$(_product_var_list), \
       $(call inherit-product_append-var,$(v),$(1))) \
@@ -290,7 +329,6 @@ _product_stash_var_list := $(_product_var_list) \
 	TARGET_NO_RECOVERY \
 	TARGET_NO_RADIOIMAGE \
 	TARGET_HARDWARE_3D \
-	TARGET_PROVIDES_INIT_RC \
 	TARGET_CPU_ABI \
 	TARGET_CPU_ABI2 \
 
@@ -321,42 +359,17 @@ _product_stash_var_list += \
 _product_stash_var_list += \
 	DEFAULT_SYSTEM_DEV_CERTIFICATE \
 	WITH_DEXPREOPT \
-	WITH_DEXPREOPT_BOOT_IMG_ONLY
-
-_product_stash_var_list += \
-	GLOBAL_CFLAGS_NO_OVERRIDE \
-	GLOBAL_CPPFLAGS_NO_OVERRIDE \
-
-_product_stash_var_list += \
-	TARGET_SKIP_DEFAULT_LOCALE \
-	TARGET_SKIP_PRODUCT_DEVICE \
+	WITH_DEXPREOPT_BOOT_IMG_AND_SYSTEM_SERVER_ONLY \
+	WITH_DEXPREOPT_APP_IMAGE
 
 #
-# Stash values of the variables in _product_stash_var_list.
-# $(1): Renamed prefix
+# Mark the variables in _product_stash_var_list as readonly
 #
-define stash-product-vars
+define readonly-product-vars
 $(foreach v,$(_product_stash_var_list), \
-        $(eval $(strip $(1))_$(call rot13,$(v)):=$$($$(v))) \
+	$(eval $(v) ?=) \
+	$(eval .KATI_READONLY := $(v)) \
  )
-endef
-
-#
-# Assert that the the variable stashed by stash-product-vars remains untouched.
-# $(1): The prefix as supplied to stash-product-vars
-#
-define assert-product-vars
-$(strip \
-  $(eval changed_variables:=)
-  $(foreach v,$(_product_stash_var_list), \
-    $(if $(call streq,$($(v)),$($(strip $(1))_$(call rot13,$(v)))),, \
-        $(eval $(warning $(v) has been modified: $($(v)))) \
-        $(eval $(warning previous value: $($(strip $(1))_$(call rot13,$(v))))) \
-        $(eval changed_variables := $(changed_variables) $(v))) \
-   ) \
-  $(if $(changed_variables),\
-    $(eval $(error The following variables have been changed: $(changed_variables))),)
-)
 endef
 
 define add-to-product-copy-files-if-exists
@@ -371,5 +384,16 @@ _PDPMC_SP_PLACE_HOLDER := |@SP@|
 define add-product-dex-preopt-module-config
 $(eval _c := $(subst $(space),$(_PDPMC_SP_PLACE_HOLDER),$(strip $(2))))\
 $(eval PRODUCT_DEX_PREOPT_MODULE_CONFIGS += \
+  $(foreach m,$(1),$(m)=$(_c)))
+endef
+
+# whitespace placeholder when we record module's sanitizer config.
+_PSMC_SP_PLACE_HOLDER := |@SP@|
+# Set up sanitizer config for a module.
+# $(1) list of module names
+# $(2) the modules' sanitizer config
+define add-product-sanitizer-module-config
+$(eval _c := $(subst $(space),$(_PSMC_SP_PLACE_HOLDER),$(strip $(2))))\
+$(eval PRODUCT_SANITIZER_MODULE_CONFIGS += \
   $(foreach m,$(1),$(m)=$(_c)))
 endef

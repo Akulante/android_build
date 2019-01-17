@@ -11,8 +11,64 @@
 #         This can be useful if you set OUT_DIR to be a different directory
 #         than other outputs of your build system.
 
+# Returns all words in $1 up to and including $2
+define find_and_earlier
+  $(strip $(if $(1),
+    $(firstword $(1))
+    $(if $(filter $(firstword $(1)),$(2)),,
+      $(call find_and_earlier,$(wordlist 2,$(words $(1)),$(1)),$(2)))))
+endef
+
+#$(warning $(call find_and_earlier,A B C,A))
+#$(warning $(call find_and_earlier,A B C,B))
+#$(warning $(call find_and_earlier,A B C,C))
+#$(warning $(call find_and_earlier,A B C,D))
+
+define version-list
+$(1)PR1 $(1)PD1 $(1)PD2 $(1)PM1 $(1)PM2
+endef
+
+ALL_VERSIONS := O P Q R S T U V W X Y Z
+ALL_VERSIONS := $(foreach v,$(ALL_VERSIONS),$(call version-list,$(v)))
+
+# Filters ALL_VERSIONS down to the range [$1, $2], and errors if $1 > $2 or $3 is
+# not in [$1, $2]
+# $(1): min platform version
+# $(2): max platform version
+# $(3): default platform version
+define allowed-platform-versions
+$(strip \
+  $(if $(filter $(ALL_VERSIONS),$(1)),,
+    $(error Invalid MIN_PLATFORM_VERSION '$(1)'))
+  $(if $(filter $(ALL_VERSIONS),$(2)),,
+    $(error Invalid MAX_PLATFORM_VERSION '$(2)'))
+  $(if $(filter $(ALL_VERSIONS),$(3)),,
+    $(error Invalid DEFAULT_PLATFORM_VERSION '$(3)'))
+
+  $(eval allowed_versions_ := $(call find_and_earlier,$(ALL_VERSIONS),$(2)))
+
+  $(if $(filter $(allowed_versions_),$(1)),,
+    $(error MIN_PLATFORM_VERSION '$(1)' must be before MAX_PLATFORM_VERSION '$(2)'))
+
+  $(eval allowed_versions_ := $(1) \
+    $(filter-out $(call find_and_earlier,$(allowed_versions_),$(1)),$(allowed_versions_)))
+
+  $(if $(filter $(allowed_versions_),$(3)),,
+    $(error DEFAULT_PLATFORM_VERSION '$(3)' must be between MIN_PLATFORM_VERSION '$(1)' and MAX_PLATFORM_VERSION '$(2)'))
+
+  $(allowed_versions_))
+endef
+
+#$(warning $(call allowed-platform-versions,OPR1,PPR1,OPR1))
+#$(warning $(call allowed-platform-versions,OPM1,PPR1,OPR1))
+
 # Set up version information.
 include $(BUILD_SYSTEM)/version_defaults.mk
+
+ENABLED_VERSIONS := $(call find_and_earlier,$(ALL_VERSIONS),$(TARGET_PLATFORM_VERSION))
+
+$(foreach v,$(ENABLED_VERSIONS), \
+  $(eval IS_AT_LEAST_$(v) := true))
 
 # ---------------------------------------------------------------
 # If you update the build system such that the environment setup
@@ -20,14 +76,14 @@ include $(BUILD_SYSTEM)/version_defaults.mk
 # people who haven't re-run those will have to do so before they
 # can build.  Make sure to also update the corresponding value in
 # buildspec.mk.default and envsetup.sh.
-CORRECT_BUILD_ENV_SEQUENCE_NUMBER := 10
+CORRECT_BUILD_ENV_SEQUENCE_NUMBER := 13
 
 # ---------------------------------------------------------------
 # The product defaults to generic on hardware
 # NOTE: This will be overridden in product_config.mk if make
 # was invoked with a PRODUCT-xxx-yyy goal.
 ifeq ($(TARGET_PRODUCT),)
-TARGET_PRODUCT := full
+TARGET_PRODUCT := aosp_arm
 endif
 
 
@@ -46,6 +102,12 @@ UNAME := $(shell uname -sm)
 # HOST_OS
 ifneq (,$(findstring Linux,$(UNAME)))
   HOST_OS := linux
+    ifneq (,$(findstring Microsoft,$(shell uname -r)))
+      # Microsoft Windows Subsystem for Linux
+      # The HOST_OS is still Linux but with some limitations.
+      # Assumes that there are no other Microsoft Linux kernels
+      HOST_OS_IS_WSL := true
+    endif
 endif
 ifneq (,$(findstring Darwin,$(UNAME)))
   HOST_OS := darwin
@@ -53,19 +115,19 @@ endif
 ifneq (,$(findstring Macintosh,$(UNAME)))
   HOST_OS := darwin
 endif
-ifneq (,$(findstring CYGWIN,$(UNAME)))
-  HOST_OS := windows
-endif
+
+HOST_OS_EXTRA:=$(shell python -c "import platform; print(platform.platform())")
 
 # BUILD_OS is the real host doing the build.
 BUILD_OS := $(HOST_OS)
 
-# Under Linux, if USE_MINGW is set, we change HOST_OS to Windows to build the
-# Windows SDK. Only a subset of tools and SDK will manage to build properly.
+HOST_CROSS_OS :=
+# We can cross-build Windows binaries on Linux
 ifeq ($(HOST_OS),linux)
-ifdef USE_MINGW
-  HOST_OS := windows
-endif
+HOST_CROSS_OS := windows
+HOST_CROSS_ARCH := x86
+HOST_CROSS_2ND_ARCH := x86_64
+2ND_HOST_CROSS_IS_64_BIT := true
 endif
 
 ifeq ($(HOST_OS),)
@@ -78,7 +140,7 @@ ifneq (,$(findstring x86_64,$(UNAME)))
   HOST_2ND_ARCH := x86
   HOST_IS_64_BIT := true
 else
-ifneq (,$(findstring x86,$(UNAME)))
+ifneq (,$(findstring i686,$(UNAME))$(findstring x86,$(UNAME)))
 $(error Building on a 32-bit x86 host is not supported: $(UNAME)!)
 endif
 endif
@@ -105,20 +167,24 @@ endif
 HOST_PREBUILT_ARCH := x86
 # This is the standard way to name a directory containing prebuilt host
 # objects. E.g., prebuilt/$(HOST_PREBUILT_TAG)/cc
-ifeq ($(HOST_OS),windows)
-  HOST_PREBUILT_TAG := windows
-else
-  HOST_PREBUILT_TAG := $(HOST_OS)-$(HOST_PREBUILT_ARCH)
-endif
+HOST_PREBUILT_TAG := $(BUILD_OS)-$(HOST_PREBUILT_ARCH)
 
 # TARGET_COPY_OUT_* are all relative to the staging directory, ie PRODUCT_OUT.
 # Define them here so they can be used in product config files.
 TARGET_COPY_OUT_SYSTEM := system
+TARGET_COPY_OUT_SYSTEM_OTHER := system_other
 TARGET_COPY_OUT_DATA := data
+TARGET_COPY_OUT_ASAN := $(TARGET_COPY_OUT_DATA)/asan
 TARGET_COPY_OUT_OEM := oem
 TARGET_COPY_OUT_ODM := odm
 TARGET_COPY_OUT_ROOT := root
 TARGET_COPY_OUT_RECOVERY := recovery
+
+# Returns the non-sanitized version of the path provided in $1.
+define get_non_asan_path
+$(patsubst $(PRODUCT_OUT)/$(TARGET_COPY_OUT_ASAN)/%,$(PRODUCT_OUT)/%,$1)
+endef
+
 ###########################################
 # Define TARGET_COPY_OUT_VENDOR to a placeholder, for at this point
 # we don't know if the device wants to build a separate vendor.img
@@ -130,6 +196,13 @@ _vendor_path_placeholder := ||VENDOR-PATH-PH||
 TARGET_COPY_OUT_VENDOR := $(_vendor_path_placeholder)
 ###########################################
 
+#################################################################
+# Set up minimal BOOTCLASSPATH list of jars to build/execute
+# java code with dalvikvm/art.
+TARGET_CORE_JARS := core-oj core-libart conscrypt okhttp bouncycastle apache-xml
+HOST_CORE_JARS := $(addsuffix -hostdex,$(TARGET_CORE_JARS))
+#################################################################
+
 # Read the product specs so we can get TARGET_DEVICE and other
 # variables that we need in order to locate the output files.
 include $(BUILD_SYSTEM)/product_config.mk
@@ -140,15 +213,6 @@ $(warning bad TARGET_BUILD_VARIANT: $(TARGET_BUILD_VARIANT))
 $(error must be empty or one of: eng user userdebug)
 endif
 
-# Build host as 32-bit for SDK build.
-ifneq ($(filter $(MAKECMDGOALS),win_sdk sdk),)
-HOST_PREFER_32_BIT := true
-endif
-ifdef USE_MINGW
-# We only build sdk host tools in the MinGW windows build.
-# Build it as 32-bit as well.
-HOST_PREFER_32_BIT := true
-endif
 SDK_HOST_ARCH := x86
 
 # Boards may be defined under $(SRC_TARGET_DIR)/board/$(TARGET_DEVICE)
@@ -156,11 +220,11 @@ SDK_HOST_ARCH := x86
 # make sure only one exists.
 # Real boards should always be associated with an OEM vendor.
 board_config_mk := \
-	$(strip $(wildcard \
+	$(strip $(sort $(wildcard \
 		$(SRC_TARGET_DIR)/board/$(TARGET_DEVICE)/BoardConfig.mk \
-		$(shell test -d device && find device -maxdepth 4 -path '*/$(TARGET_DEVICE)/BoardConfig.mk') \
-		$(shell test -d vendor && find vendor -maxdepth 4 -path '*/$(TARGET_DEVICE)/BoardConfig.mk') \
-	))
+		$(shell test -d device && find -L device -maxdepth 4 -path '*/$(TARGET_DEVICE)/BoardConfig.mk') \
+		$(shell test -d vendor && find -L vendor -maxdepth 4 -path '*/$(TARGET_DEVICE)/BoardConfig.mk') \
+	)))
 ifeq ($(board_config_mk),)
   $(error No config file found for TARGET_DEVICE $(TARGET_DEVICE))
 endif
@@ -170,6 +234,10 @@ endif
 include $(board_config_mk)
 ifeq ($(TARGET_ARCH),)
   $(error TARGET_ARCH not defined by board config: $(board_config_mk))
+endif
+ifneq ($(MALLOC_IMPL),)
+  $(warning *** Unsupported option MALLOC_IMPL defined by board config: $(board_config_mk).)
+  $(error Use `MALLOC_SVELTE := true` to configure jemalloc for low-memory)
 endif
 TARGET_DEVICE_DIR := $(patsubst %/,%,$(dir $(board_config_mk)))
 board_config_mk :=
@@ -182,8 +250,40 @@ else ifeq ($(filter vendor system/vendor system,$(TARGET_COPY_OUT_VENDOR)),)
 $(error TARGET_COPY_OUT_VENDOR must be either 'vendor', 'system/vendor' or 'system', seeing '$(TARGET_COPY_OUT_VENDOR)'.)
 endif
 PRODUCT_COPY_FILES := $(subst $(_vendor_path_placeholder),$(TARGET_COPY_OUT_VENDOR),$(PRODUCT_COPY_FILES))
-###########################################
 
+BOARD_USES_VENDORIMAGE :=
+ifdef BOARD_PREBUILT_VENDORIMAGE
+BOARD_USES_VENDORIMAGE := true
+endif
+ifdef BOARD_VENDORIMAGE_FILE_SYSTEM_TYPE
+BOARD_USES_VENDORIMAGE := true
+endif
+ifeq ($(TARGET_COPY_OUT_VENDOR),vendor)
+BOARD_USES_VENDORIMAGE := true
+else ifdef BOARD_USES_VENDORIMAGE
+$(error TARGET_COPY_OUT_VENDOR must be set to 'vendor' to use a vendor image)
+endif
+###########################################
+# Ensure that only TARGET_RECOVERY_UPDATER_LIBS *or* AB_OTA_UPDATER is set.
+TARGET_RECOVERY_UPDATER_LIBS ?=
+AB_OTA_UPDATER ?=
+.KATI_READONLY := TARGET_RECOVERY_UPDATER_LIBS AB_OTA_UPDATER
+ifeq ($(AB_OTA_UPDATER),true)
+  ifneq ($(strip $(TARGET_RECOVERY_UPDATER_LIBS)),)
+    $(error Do not use TARGET_RECOVERY_UPDATER_LIBS when using AB_OTA_UPDATER)
+  endif
+endif
+
+# Check BOARD_VNDK_VERSION
+ifdef BOARD_VNDK_VERSION
+  ifneq ($(BOARD_VNDK_VERSION),current)
+    $(error BOARD_VNDK_VERSION: Only "current" is implemented)
+  endif
+
+  TARGET_VENDOR_TEST_SUFFIX := /vendor
+else
+  TARGET_VENDOR_TEST_SUFFIX :=
+endif
 
 # ---------------------------------------------------------------
 # Set up configuration for target machine.
@@ -217,6 +317,8 @@ OUT_DIR := $(OUT_DIR_COMMON_BASE)/$(notdir $(PWD))
 endif
 endif
 
+SOONG_OUT_DIR := $(OUT_DIR)/soong
+
 DEBUG_OUT_DIR := $(OUT_DIR)/debug
 
 # Move the host or target under the debug/ directory
@@ -233,8 +335,13 @@ HOST_OUT_ROOT := $(HOST_OUT_ROOT_$(HOST_BUILD_TYPE))
 HOST_OUT_release := $(HOST_OUT_ROOT_release)/$(HOST_OS)-$(HOST_PREBUILT_ARCH)
 HOST_OUT_debug := $(HOST_OUT_ROOT_debug)/$(HOST_OS)-$(HOST_PREBUILT_ARCH)
 HOST_OUT := $(HOST_OUT_$(HOST_BUILD_TYPE))
+SOONG_HOST_OUT := $(SOONG_OUT_DIR)/host/$(HOST_OS)-$(HOST_PREBUILT_ARCH)
+# TODO: remove
+BUILD_OUT := $(HOST_OUT)
 
-BUILD_OUT := $(OUT_DIR)/host/$(BUILD_OS)-$(HOST_PREBUILT_ARCH)
+HOST_CROSS_OUT_release := $(HOST_OUT_ROOT_release)/windows-$(HOST_PREBUILT_ARCH)
+HOST_CROSS_OUT_debug := $(HOST_OUT_ROOT_debug)/windows-$(HOST_PREBUILT_ARCH)
+HOST_CROSS_OUT := $(HOST_CROSS_OUT_$(HOST_BUILD_TYPE))
 
 TARGET_PRODUCT_OUT_ROOT := $(TARGET_OUT_ROOT)/product
 
@@ -246,21 +353,39 @@ PRODUCT_OUT := $(TARGET_PRODUCT_OUT_ROOT)/$(TARGET_DEVICE)
 OUT_DOCS := $(TARGET_COMMON_OUT_ROOT)/docs
 
 BUILD_OUT_EXECUTABLES := $(BUILD_OUT)/bin
+SOONG_HOST_OUT_EXECUTABLES := $(SOONG_HOST_OUT)/bin
 
 HOST_OUT_EXECUTABLES := $(HOST_OUT)/bin
 HOST_OUT_SHARED_LIBRARIES := $(HOST_OUT)/lib64
+HOST_OUT_RENDERSCRIPT_BITCODE := $(HOST_OUT_SHARED_LIBRARIES)
 HOST_OUT_JAVA_LIBRARIES := $(HOST_OUT)/framework
 HOST_OUT_SDK_ADDON := $(HOST_OUT)/sdk_addon
+HOST_OUT_NATIVE_TESTS := $(HOST_OUT)/nativetest64
+HOST_OUT_COVERAGE := $(HOST_OUT)/coverage
+
+HOST_CROSS_OUT_EXECUTABLES := $(HOST_CROSS_OUT)/bin
+HOST_CROSS_OUT_SHARED_LIBRARIES := $(HOST_CROSS_OUT)/lib
+HOST_CROSS_OUT_NATIVE_TESTS := $(HOST_CROSS_OUT)/nativetest
+HOST_CROSS_OUT_COVERAGE := $(HOST_CROSS_OUT)/coverage
+HOST_OUT_TESTCASES := $(HOST_OUT)/testcases
 
 HOST_OUT_INTERMEDIATES := $(HOST_OUT)/obj
-HOST_OUT_HEADERS := $(HOST_OUT_INTERMEDIATES)/include
 HOST_OUT_INTERMEDIATE_LIBRARIES := $(HOST_OUT_INTERMEDIATES)/lib
 HOST_OUT_NOTICE_FILES := $(HOST_OUT_INTERMEDIATES)/NOTICE_FILES
 HOST_OUT_COMMON_INTERMEDIATES := $(HOST_COMMON_OUT_ROOT)/obj
 HOST_OUT_FAKE := $(HOST_OUT)/fake_packages
 
+# Nano environment config
+include $(BUILD_SYSTEM)/aux_config.mk
+
+HOST_CROSS_OUT_INTERMEDIATES := $(HOST_CROSS_OUT)/obj
+HOST_CROSS_OUT_INTERMEDIATE_LIBRARIES := $(HOST_CROSS_OUT_INTERMEDIATES)/lib
+HOST_CROSS_OUT_NOTICE_FILES := $(HOST_CROSS_OUT_INTERMEDIATES)/NOTICE_FILES
+
 HOST_OUT_GEN := $(HOST_OUT)/gen
 HOST_OUT_COMMON_GEN := $(HOST_COMMON_OUT_ROOT)/gen
+
+HOST_CROSS_OUT_GEN := $(HOST_CROSS_OUT)/gen
 
 # Out for HOST_2ND_ARCH
 HOST_2ND_ARCH_VAR_PREFIX := 2ND_
@@ -269,33 +394,57 @@ $(HOST_2ND_ARCH_VAR_PREFIX)HOST_OUT_INTERMEDIATES := $(HOST_OUT)/obj32
 $(HOST_2ND_ARCH_VAR_PREFIX)HOST_OUT_INTERMEDIATE_LIBRARIES := $($(HOST_2ND_ARCH_VAR_PREFIX)HOST_OUT_INTERMEDIATES)/lib
 $(HOST_2ND_ARCH_VAR_PREFIX)HOST_OUT_SHARED_LIBRARIES := $(HOST_OUT)/lib
 $(HOST_2ND_ARCH_VAR_PREFIX)HOST_OUT_EXECUTABLES := $(HOST_OUT_EXECUTABLES)
+$(HOST_2ND_ARCH_VAR_PREFIX)HOST_OUT_JAVA_LIBRARIES := $(HOST_OUT_JAVA_LIBRARIES)
+$(HOST_2ND_ARCH_VAR_PREFIX)HOST_OUT_NATIVE_TESTS := $(HOST_OUT)/nativetest
+$(HOST_2ND_ARCH_VAR_PREFIX)HOST_OUT_TESTCASES := $(HOST_OUT_TESTCASES)
 
 # The default host library path.
 # It always points to the path where we build libraries in the default bitness.
-ifeq ($(HOST_PREFER_32_BIT),true)
-HOST_LIBRARY_PATH := $($(HOST_2ND_ARCH_VAR_PREFIX)HOST_OUT_SHARED_LIBRARIES)
-else
 HOST_LIBRARY_PATH := $(HOST_OUT_SHARED_LIBRARIES)
-endif
 
-TARGET_OUT_INTERMEDIATES := $(PRODUCT_OUT)/obj
+# Out for HOST_CROSS_2ND_ARCH
+HOST_CROSS_2ND_ARCH_VAR_PREFIX := 2ND_
+HOST_CROSS_2ND_ARCH_MODULE_SUFFIX := _64
+$(HOST_CROSS_2ND_ARCH_VAR_PREFIX)HOST_CROSS_OUT_INTERMEDIATES := $(HOST_CROSS_OUT)/obj64
+$(HOST_CROSS_2ND_ARCH_VAR_PREFIX)HOST_CROSS_OUT_INTERMEDIATE_LIBRARIES := $($(HOST_CROSS_2ND_ARCH_VAR_PREFIX)HOST_CROSS_OUT_INTERMEDIATES)/lib
+$(HOST_CROSS_2ND_ARCH_VAR_PREFIX)HOST_CROSS_OUT_SHARED_LIBRARIES := $(HOST_CROSS_OUT)/lib64
+$(HOST_CROSS_2ND_ARCH_VAR_PREFIX)HOST_CROSS_OUT_EXECUTABLES := $(HOST_CROSS_OUT_EXECUTABLES)
+$(HOST_CROSS_2ND_ARCH_VAR_PREFIX)HOST_CROSS_OUT_NATIVE_TESTS := $(HOST_CROSS_OUT)/nativetest64
+
+ifneq ($(filter address,$(SANITIZE_TARGET)),)
+  TARGET_OUT_INTERMEDIATES := $(PRODUCT_OUT)/obj_asan
+else
+  TARGET_OUT_INTERMEDIATES := $(PRODUCT_OUT)/obj
+endif
 TARGET_OUT_HEADERS := $(TARGET_OUT_INTERMEDIATES)/include
 TARGET_OUT_INTERMEDIATE_LIBRARIES := $(TARGET_OUT_INTERMEDIATES)/lib
-TARGET_OUT_COMMON_INTERMEDIATES := $(TARGET_COMMON_OUT_ROOT)/obj
+
+ifneq ($(filter address,$(SANITIZE_TARGET)),)
+  TARGET_OUT_COMMON_INTERMEDIATES := $(TARGET_COMMON_OUT_ROOT)/obj_asan
+else
+  TARGET_OUT_COMMON_INTERMEDIATES := $(TARGET_COMMON_OUT_ROOT)/obj
+endif
 
 TARGET_OUT_GEN := $(PRODUCT_OUT)/gen
 TARGET_OUT_COMMON_GEN := $(TARGET_COMMON_OUT_ROOT)/gen
 
 TARGET_OUT := $(PRODUCT_OUT)/$(TARGET_COPY_OUT_SYSTEM)
+ifneq ($(filter address,$(SANITIZE_TARGET)),)
+target_out_shared_libraries_base := $(PRODUCT_OUT)/$(TARGET_COPY_OUT_ASAN)/system
+else
+target_out_shared_libraries_base := $(TARGET_OUT)
+endif
+
 TARGET_OUT_EXECUTABLES := $(TARGET_OUT)/bin
 TARGET_OUT_OPTIONAL_EXECUTABLES := $(TARGET_OUT)/xbin
 ifeq ($(TARGET_IS_64_BIT),true)
 # /system/lib always contains 32-bit libraries,
 # and /system/lib64 (if present) always contains 64-bit libraries.
-TARGET_OUT_SHARED_LIBRARIES := $(TARGET_OUT)/lib64
+TARGET_OUT_SHARED_LIBRARIES := $(target_out_shared_libraries_base)/lib64
 else
-TARGET_OUT_SHARED_LIBRARIES := $(TARGET_OUT)/lib
+TARGET_OUT_SHARED_LIBRARIES := $(target_out_shared_libraries_base)/lib
 endif
+TARGET_OUT_RENDERSCRIPT_BITCODE := $(TARGET_OUT_SHARED_LIBRARIES)
 TARGET_OUT_JAVA_LIBRARIES := $(TARGET_OUT)/framework
 TARGET_OUT_APPS := $(TARGET_OUT)/app
 TARGET_OUT_APPS_PRIVILEGED := $(TARGET_OUT)/priv-app
@@ -304,16 +453,35 @@ TARGET_OUT_KEYCHARS := $(TARGET_OUT)/usr/keychars
 TARGET_OUT_ETC := $(TARGET_OUT)/etc
 TARGET_OUT_NOTICE_FILES := $(TARGET_OUT_INTERMEDIATES)/NOTICE_FILES
 TARGET_OUT_FAKE := $(PRODUCT_OUT)/fake_packages
+TARGET_OUT_TESTCASES := $(PRODUCT_OUT)/testcases
+
+TARGET_OUT_SYSTEM_OTHER := $(PRODUCT_OUT)/$(TARGET_COPY_OUT_SYSTEM_OTHER)
 
 # Out for TARGET_2ND_ARCH
 TARGET_2ND_ARCH_VAR_PREFIX := $(HOST_2ND_ARCH_VAR_PREFIX)
+ifeq ($(TARGET_TRANSLATE_2ND_ARCH),true)
+# With this you can reference the arm binary translation library with libfoo_arm in PRODUCT_PACKAGES.
+TARGET_2ND_ARCH_MODULE_SUFFIX := _$(TARGET_2ND_ARCH)
+else
 TARGET_2ND_ARCH_MODULE_SUFFIX := $(HOST_2ND_ARCH_MODULE_SUFFIX)
-$(TARGET_2ND_ARCH_VAR_PREFIX)TARGET_OUT_INTERMEDIATES := $(PRODUCT_OUT)/obj_$(TARGET_2ND_ARCH)
+endif
+
+ifneq ($(filter address,$(SANITIZE_TARGET)),)
+  $(TARGET_2ND_ARCH_VAR_PREFIX)TARGET_OUT_INTERMEDIATES := $(PRODUCT_OUT)/obj_$(TARGET_2ND_ARCH)_asan
+else
+  $(TARGET_2ND_ARCH_VAR_PREFIX)TARGET_OUT_INTERMEDIATES := $(PRODUCT_OUT)/obj_$(TARGET_2ND_ARCH)
+endif
 $(TARGET_2ND_ARCH_VAR_PREFIX)TARGET_OUT_INTERMEDIATE_LIBRARIES := $($(TARGET_2ND_ARCH_VAR_PREFIX)TARGET_OUT_INTERMEDIATES)/lib
-$(TARGET_2ND_ARCH_VAR_PREFIX)TARGET_OUT_SHARED_LIBRARIES := $(TARGET_OUT)/lib
+ifeq ($(TARGET_TRANSLATE_2ND_ARCH),true)
+$(TARGET_2ND_ARCH_VAR_PREFIX)TARGET_OUT_SHARED_LIBRARIES := $(target_out_shared_libraries_base)/lib/$(TARGET_2ND_ARCH)
+else
+$(TARGET_2ND_ARCH_VAR_PREFIX)TARGET_OUT_SHARED_LIBRARIES := $(target_out_shared_libraries_base)/lib
+endif
+$(TARGET_2ND_ARCH_VAR_PREFIX)TARGET_OUT_RENDERSCRIPT_BITCODE := $($(TARGET_2ND_ARCH_VAR_PREFIX)TARGET_OUT_SHARED_LIBRARIES)
 $(TARGET_2ND_ARCH_VAR_PREFIX)TARGET_OUT_EXECUTABLES := $(TARGET_OUT_EXECUTABLES)
 $(TARGET_2ND_ARCH_VAR_PREFIX)TARGET_OUT_APPS := $(TARGET_OUT_APPS)
 $(TARGET_2ND_ARCH_VAR_PREFIX)TARGET_OUT_APPS_PRIVILEGED := $(TARGET_OUT_APPS_PRIVILEGED)
+$(TARGET_2ND_ARCH_VAR_PREFIX)TARGET_OUT_TESTCASES := $(TARGET_OUT_TESTCASES)
 
 TARGET_OUT_DATA := $(PRODUCT_OUT)/$(TARGET_COPY_OUT_DATA)
 TARGET_OUT_DATA_EXECUTABLES := $(TARGET_OUT_EXECUTABLES)
@@ -325,33 +493,63 @@ TARGET_OUT_DATA_KEYCHARS := $(TARGET_OUT_KEYCHARS)
 TARGET_OUT_DATA_ETC := $(TARGET_OUT_ETC)
 ifeq ($(TARGET_IS_64_BIT),true)
 TARGET_OUT_DATA_NATIVE_TESTS := $(TARGET_OUT_DATA)/nativetest64
+TARGET_OUT_DATA_METRIC_TESTS := $(TARGET_OUT_DATA)/benchmarktest64
+TARGET_OUT_VENDOR_NATIVE_TESTS := $(TARGET_OUT_DATA)/nativetest64$(TARGET_VENDOR_TEST_SUFFIX)
+TARGET_OUT_VENDOR_METRIC_TESTS := $(TARGET_OUT_DATA)/benchmarktest64$(TARGET_VENDOR_TEST_SUFFIX)
 else
 TARGET_OUT_DATA_NATIVE_TESTS := $(TARGET_OUT_DATA)/nativetest
+TARGET_OUT_DATA_METRIC_TESTS := $(TARGET_OUT_DATA)/benchmarktest
+TARGET_OUT_VENDOR_NATIVE_TESTS := $(TARGET_OUT_DATA)/nativetest$(TARGET_VENDOR_TEST_SUFFIX)
+TARGET_OUT_VENDOR_METRIC_TESTS := $(TARGET_OUT_DATA)/benchmarktest$(TARGET_VENDOR_TEST_SUFFIX)
 endif
 TARGET_OUT_DATA_FAKE := $(TARGET_OUT_DATA)/fake_packages
 
 $(TARGET_2ND_ARCH_VAR_PREFIX)TARGET_OUT_DATA_EXECUTABLES := $(TARGET_OUT_DATA_EXECUTABLES)
 $(TARGET_2ND_ARCH_VAR_PREFIX)TARGET_OUT_DATA_SHARED_LIBRARIES := $($(TARGET_2ND_ARCH_VAR_PREFIX)TARGET_OUT_SHARED_LIBRARIES)
 $(TARGET_2ND_ARCH_VAR_PREFIX)TARGET_OUT_DATA_APPS := $(TARGET_OUT_DATA_APPS)
+ifeq ($(TARGET_TRANSLATE_2ND_ARCH),true)
+$(TARGET_2ND_ARCH_VAR_PREFIX)TARGET_OUT_DATA_NATIVE_TESTS := $(TARGET_OUT_DATA)/nativetest/$(TARGET_2ND_ARCH)
+$(TARGET_2ND_ARCH_VAR_PREFIX)TARGET_OUT_DATA_METRIC_TESTS := $(TARGET_OUT_DATA)/benchmarktest/$(TARGET_2ND_ARCH)
+$(TARGET_2ND_ARCH_VAR_PREFIX)TARGET_OUT_VENDOR_NATIVE_TESTS := $(TARGET_OUT_DATA)/nativetest/$(TARGET_2ND_ARCH)$(TARGET_VENDOR_TEST_SUFFIX)
+$(TARGET_2ND_ARCH_VAR_PREFIX)TARGET_OUT_VENDOR_METRIC_TESTS := $(TARGET_OUT_DATA)/benchmarktest/$(TARGET_2ND_ARCH)$(TARGET_VENDOR_TEST_SUFFIX)
+else
 $(TARGET_2ND_ARCH_VAR_PREFIX)TARGET_OUT_DATA_NATIVE_TESTS := $(TARGET_OUT_DATA)/nativetest
+$(TARGET_2ND_ARCH_VAR_PREFIX)TARGET_OUT_DATA_METRIC_TESTS := $(TARGET_OUT_DATA)/benchmarktest
+$(TARGET_2ND_ARCH_VAR_PREFIX)TARGET_OUT_VENDOR_NATIVE_TESTS := $(TARGET_OUT_DATA)/nativetest$(TARGET_VENDOR_TEST_SUFFIX)
+$(TARGET_2ND_ARCH_VAR_PREFIX)TARGET_OUT_VENDOR_METRIC_TESTS := $(TARGET_OUT_DATA)/benchmarktest$(TARGET_VENDOR_TEST_SUFFIX)
+endif
 
 TARGET_OUT_CACHE := $(PRODUCT_OUT)/cache
 
 TARGET_OUT_VENDOR := $(PRODUCT_OUT)/$(TARGET_COPY_OUT_VENDOR)
+ifneq ($(filter address,$(SANITIZE_TARGET)),)
+target_out_vendor_shared_libraries_base := $(PRODUCT_OUT)/$(TARGET_COPY_OUT_ASAN)/vendor
+else
+target_out_vendor_shared_libraries_base := $(TARGET_OUT_VENDOR)
+endif
+
 TARGET_OUT_VENDOR_EXECUTABLES := $(TARGET_OUT_VENDOR)/bin
 TARGET_OUT_VENDOR_OPTIONAL_EXECUTABLES := $(TARGET_OUT_VENDOR)/xbin
 ifeq ($(TARGET_IS_64_BIT),true)
-TARGET_OUT_VENDOR_SHARED_LIBRARIES := $(TARGET_OUT_VENDOR)/lib64
+TARGET_OUT_VENDOR_SHARED_LIBRARIES := $(target_out_vendor_shared_libraries_base)/lib64
 else
-TARGET_OUT_VENDOR_SHARED_LIBRARIES := $(TARGET_OUT_VENDOR)/lib
+TARGET_OUT_VENDOR_SHARED_LIBRARIES := $(target_out_vendor_shared_libraries_base)/lib
 endif
+TARGET_OUT_VENDOR_RENDERSCRIPT_BITCODE := $(TARGET_OUT_VENDOR_SHARED_LIBRARIES)
 TARGET_OUT_VENDOR_JAVA_LIBRARIES := $(TARGET_OUT_VENDOR)/framework
 TARGET_OUT_VENDOR_APPS := $(TARGET_OUT_VENDOR)/app
+TARGET_OUT_VENDOR_APPS_PRIVILEGED := $(TARGET_OUT_VENDOR)/priv-app
 TARGET_OUT_VENDOR_ETC := $(TARGET_OUT_VENDOR)/etc
 
 $(TARGET_2ND_ARCH_VAR_PREFIX)TARGET_OUT_VENDOR_EXECUTABLES := $(TARGET_OUT_VENDOR_EXECUTABLES)
-$(TARGET_2ND_ARCH_VAR_PREFIX)TARGET_OUT_VENDOR_SHARED_LIBRARIES := $(TARGET_OUT_VENDOR)/lib
+ifeq ($(TARGET_TRANSLATE_2ND_ARCH),true)
+$(TARGET_2ND_ARCH_VAR_PREFIX)TARGET_OUT_VENDOR_SHARED_LIBRARIES := $(target_out_vendor_shared_libraries_base)/lib/$(TARGET_2ND_ARCH)
+else
+$(TARGET_2ND_ARCH_VAR_PREFIX)TARGET_OUT_VENDOR_SHARED_LIBRARIES := $(target_out_vendor_shared_libraries_base)/lib
+endif
+$(TARGET_2ND_ARCH_VAR_PREFIX)TARGET_OUT_VENDOR_RENDERSCRIPT_BITCODE := $($(TARGET_2ND_ARCH_VAR_PREFIX)TARGET_OUT_VENDOR_SHARED_LIBRARIES)
 $(TARGET_2ND_ARCH_VAR_PREFIX)TARGET_OUT_VENDOR_APPS := $(TARGET_OUT_VENDOR_APPS)
+$(TARGET_2ND_ARCH_VAR_PREFIX)TARGET_OUT_VENDOR_APPS_PRIVILEGED := $(TARGET_OUT_VENDOR_APPS_PRIVILEGED)
 
 TARGET_OUT_OEM := $(PRODUCT_OUT)/$(TARGET_COPY_OUT_OEM)
 TARGET_OUT_OEM_EXECUTABLES := $(TARGET_OUT_OEM)/bin
@@ -366,7 +564,11 @@ TARGET_OUT_OEM_APPS := $(TARGET_OUT_OEM)/app
 TARGET_OUT_OEM_ETC := $(TARGET_OUT_OEM)/etc
 
 $(TARGET_2ND_ARCH_VAR_PREFIX)TARGET_OUT_OEM_EXECUTABLES := $(TARGET_OUT_OEM_EXECUTABLES)
+ifeq ($(TARGET_TRANSLATE_2ND_ARCH),true)
+$(TARGET_2ND_ARCH_VAR_PREFIX)TARGET_OUT_OEM_SHARED_LIBRARIES := $(TARGET_OUT_OEM)/lib/$(TARGET_2ND_ARCH)
+else
 $(TARGET_2ND_ARCH_VAR_PREFIX)TARGET_OUT_OEM_SHARED_LIBRARIES := $(TARGET_OUT_OEM)/lib
+endif
 $(TARGET_2ND_ARCH_VAR_PREFIX)TARGET_OUT_OEM_APPS := $(TARGET_OUT_OEM_APPS)
 
 TARGET_OUT_ODM := $(PRODUCT_OUT)/$(TARGET_COPY_OUT_ODM)
@@ -380,8 +582,14 @@ TARGET_OUT_ODM_APPS := $(TARGET_OUT_ODM)/app
 TARGET_OUT_ODM_ETC := $(TARGET_OUT_ODM)/etc
 
 $(TARGET_2ND_ARCH_VAR_PREFIX)TARGET_OUT_ODM_EXECUTABLES := $(TARGET_OUT_ODM_EXECUTABLES)
+ifeq ($(TARGET_TRANSLATE_2ND_ARCH),true)
+$(TARGET_2ND_ARCH_VAR_PREFIX)TARGET_OUT_ODM_SHARED_LIBRARIES := $(TARGET_OUT_ODM)/lib/$(TARGET_2ND_ARCH)
+else
 $(TARGET_2ND_ARCH_VAR_PREFIX)TARGET_OUT_ODM_SHARED_LIBRARIES := $(TARGET_OUT_ODM)/lib
+endif
 $(TARGET_2ND_ARCH_VAR_PREFIX)TARGET_OUT_ODM_APPS := $(TARGET_OUT_ODM_APPS)
+
+TARGET_OUT_BREAKPAD := $(PRODUCT_OUT)/breakpad
 
 TARGET_OUT_UNSTRIPPED := $(PRODUCT_OUT)/symbols
 TARGET_OUT_EXECUTABLES_UNSTRIPPED := $(TARGET_OUT_UNSTRIPPED)/system/bin
@@ -390,6 +598,7 @@ TARGET_OUT_VENDOR_SHARED_LIBRARIES_UNSTRIPPED := $(TARGET_OUT_UNSTRIPPED)/$(TARG
 TARGET_ROOT_OUT_UNSTRIPPED := $(TARGET_OUT_UNSTRIPPED)
 TARGET_ROOT_OUT_SBIN_UNSTRIPPED := $(TARGET_OUT_UNSTRIPPED)/sbin
 TARGET_ROOT_OUT_BIN_UNSTRIPPED := $(TARGET_OUT_UNSTRIPPED)/bin
+TARGET_OUT_COVERAGE := $(PRODUCT_OUT)/coverage
 
 TARGET_ROOT_OUT := $(PRODUCT_OUT)/$(TARGET_COPY_OUT_ROOT)
 TARGET_ROOT_OUT_BIN := $(TARGET_ROOT_OUT)/bin
@@ -410,11 +619,22 @@ TARGET_INSTALLER_ROOT_OUT := $(TARGET_INSTALLER_OUT)/root
 TARGET_INSTALLER_SYSTEM_OUT := $(TARGET_INSTALLER_OUT)/root/system
 
 COMMON_MODULE_CLASSES := TARGET-NOTICE_FILES HOST-NOTICE_FILES HOST-JAVA_LIBRARIES
+PER_ARCH_MODULE_CLASSES := SHARED_LIBRARIES STATIC_LIBRARIES EXECUTABLES GYP RENDERSCRIPT_BITCODE NATIVE_TESTS HEADER_LIBRARIES
 
 ifeq (,$(strip $(DIST_DIR)))
   DIST_DIR := $(OUT_DIR)/dist
 endif
 
-ifeq ($(PRINT_BUILD_CONFIG),)
-PRINT_BUILD_CONFIG := true
+ifndef KATI
+PRINT_BUILD_CONFIG ?= true
+endif
+
+ifeq ($(USE_CLANG_PLATFORM_BUILD),)
+USE_CLANG_PLATFORM_BUILD := true
+endif
+
+ifneq ($(USE_CLANG_PLATFORM_BUILD),true)
+ifneq ($(USE_CLANG_PLATFORM_BUILD),false)
+$(error USE_CLANG_PLATFORM_BUILD must be true or false)
+endif
 endif

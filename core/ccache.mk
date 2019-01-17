@@ -14,10 +14,10 @@
 # limitations under the License.
 #
 
-ifneq ($(USE_CCACHE),)
+ifneq ($(filter-out false,$(USE_CCACHE)),)
   # The default check uses size and modification time, causing false misses
   # since the mtime depends when the repo was checked out
-  export CCACHE_COMPILERCHECK := content
+  export CCACHE_COMPILERCHECK ?= content
 
   # See man page, optimizations to get more cache hits
   # implies that __DATE__ and __TIME__ are not critical for functionality.
@@ -38,13 +38,14 @@ ifneq ($(USE_CCACHE),)
   # See http://petereisentraut.blogspot.com/2011/09/ccache-and-clang-part-2.html
   export CCACHE_CPP2 := true
 
-  CCACHE_HOST_TAG := $(HOST_PREBUILT_TAG)
-  # If we are cross-compiling Windows binaries on Linux
-  # then use the linux ccache binary instead.
-  ifeq ($(HOST_OS)-$(BUILD_OS),windows-linux)
-    CCACHE_HOST_TAG := linux-$(HOST_PREBUILT_ARCH)
+  # Detect if the system already has ccache installed to use instead of the prebuilt
+  ccache := $(shell which ccache)
+
+  ifeq ($(ccache),)
+    CCACHE_HOST_TAG := $(HOST_PREBUILT_TAG)
+    ccache := prebuilts/misc/$(CCACHE_HOST_TAG)/ccache/ccache
   endif
-  ccache := prebuilts/misc/$(CCACHE_HOST_TAG)/ccache/ccache
+
   # Check that the executable is here.
   ccache := $(strip $(wildcard $(ccache)))
   ifdef ccache

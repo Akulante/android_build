@@ -1,3 +1,4 @@
+$(call record-module-type,SHARED_LIBRARY)
 my_prefix := TARGET_
 include $(BUILD_SYSTEM)/multilib.mk
 
@@ -9,17 +10,25 @@ endif
 ifeq ($(my_module_multilib),both)
 ifneq ($(LOCAL_MODULE_PATH),)
 ifneq ($(TARGET_2ND_ARCH),)
-$(warning $(LOCAL_MODULE): LOCAL_MODULE_PATH for shared libraries is unsupported in multiarch builds, use LOCAL_MODULE_RELATIVE_PATH instead)
+$(error $(LOCAL_MODULE): LOCAL_MODULE_PATH for shared libraries is unsupported in multiarch builds, use LOCAL_MODULE_RELATIVE_PATH instead)
 endif
 endif
 
 ifneq ($(LOCAL_UNSTRIPPED_PATH),)
 ifneq ($(TARGET_2ND_ARCH),)
-$(warning $(LOCAL_MODULE): LOCAL_UNSTRIPPED_PATH for shared libraries is unsupported in multiarch builds)
+$(error $(LOCAL_MODULE): LOCAL_UNSTRIPPED_PATH for shared libraries is unsupported in multiarch builds)
 endif
 endif
 endif # my_module_multilib == both
 
+
+ifeq ($(LOCAL_SDCLANG),true)
+include $(SDCLANG_FLAG_DEFS)
+endif
+
+ifeq ($(LOCAL_SDCLANG_2),true)
+include $(SDCLANG_FLAG_DEFS)
+endif
 
 LOCAL_2ND_ARCH_VAR_PREFIX :=
 include $(BUILD_SYSTEM)/module_arch_supported.mk
@@ -38,9 +47,6 @@ ifeq ($(my_module_arch_supported),true)
 OVERRIDE_BUILT_MODULE_PATH :=
 LOCAL_BUILT_MODULE :=
 LOCAL_INSTALLED_MODULE :=
-LOCAL_MODULE_STEM :=
-LOCAL_BUILT_MODULE_STEM :=
-LOCAL_INSTALLED_MODULE_STEM :=
 LOCAL_INTERMEDIATE_TARGETS :=
 
 include $(BUILD_SYSTEM)/shared_library_internal.mk
@@ -50,6 +56,18 @@ endif
 LOCAL_2ND_ARCH_VAR_PREFIX :=
 
 endif # TARGET_2ND_ARCH
+
+ifeq ($(LOCAL_SDCLANG),true)
+ifeq ($(LOCAL_SDCLANG_LTO),true)
+include $(SDCLANG_LTO_DEFS)
+endif
+endif
+
+ifeq ($(LOCAL_SDCLANG_2),true)
+ifeq ($(LOCAL_SDCLANG_LTO),true)
+include $(SDCLANG_LTO_DEFS)
+endif
+endif
 
 my_module_arch_supported :=
 

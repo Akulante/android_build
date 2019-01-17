@@ -20,16 +20,22 @@
 PRODUCT_PACKAGES += \
     adb \
     adbd \
+    android.hardware.configstore@1.0-service \
+    android.hidl.allocator@1.0-service \
+    android.hidl.memory@1.0-impl \
     atrace \
     bootanimation \
-    debuggerd \
+    bootstat \
+    charger \
+    cmd \
+    crash_dump \
+    debuggerd\
     dumpstate \
     dumpsys \
     fastboot \
     gralloc.default \
-    grep \
-    gzip \
     healthd \
+    hwservicemanager \
     init \
     init.environ.rc \
     init.rc \
@@ -38,8 +44,10 @@ PRODUCT_PACKAGES += \
     libFFTEm \
     libGLESv1_CM \
     libGLESv2 \
+    libGLESv3 \
     libbinder \
     libc \
+    libc_malloc_debug \
     libcutils \
     libdl \
     libgui \
@@ -61,26 +69,45 @@ PRODUCT_PACKAGES += \
     lmkd \
     logcat \
     logwrapper \
-    mkshrc \
-    reboot \
+    lshal \
     recovery \
     service \
     servicemanager \
-    sh \
+    shell_and_utilities \
+    storaged \
     surfaceflinger \
-    toolbox \
-    toybox \
+    thermalserviced \
+    tombstoned \
     tzdatacheck \
+    vndservice \
+    vndservicemanager \
+    compatibility_matrix.xml \
+    manifest.xml \
+    system_manifest.xml \
+    system_compatibility_matrix.xml \
 
 # SELinux packages
 PRODUCT_PACKAGES += \
-    sepolicy \
-    file_contexts \
-    seapp_contexts \
-    property_contexts \
-    mac_permissions.xml \
-    selinux_version \
-    service_contexts
+    nonplat_mac_permissions.xml \
+    nonplat_property_contexts \
+    nonplat_seapp_contexts \
+    nonplat_service_contexts \
+    nonplat_hwservice_contexts \
+    plat_mac_permissions.xml \
+    plat_property_contexts \
+    plat_seapp_contexts \
+    plat_service_contexts \
+    plat_hwservice_contexts \
+    selinux_policy \
+    vndservice_contexts
+
+# AID Generation for
+# <pwd.h> and <grp.h>
+PRODUCT_PACKAGES += \
+    passwd \
+    group \
+    fs_config_files \
+    fs_config_dirs
 
 # Ensure that this property is always defined so that bionic_systrace.cpp
 # can rely on it being initially set by init.
@@ -90,6 +117,5 @@ PRODUCT_DEFAULT_PROPERTY_OVERRIDES += \
 PRODUCT_COPY_FILES += \
     system/core/rootdir/init.usb.rc:root/init.usb.rc \
     system/core/rootdir/init.usb.configfs.rc:root/init.usb.configfs.rc \
-    system/core/rootdir/init.trace.rc:root/init.trace.rc \
     system/core/rootdir/ueventd.rc:root/ueventd.rc \
     system/core/rootdir/etc/hosts:system/etc/hosts

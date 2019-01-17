@@ -5,6 +5,7 @@
 dpi_apk_name := $(LOCAL_MODULE)_$(my_dpi)
 dpi_intermediate := $(call intermediates-dir-for,APPS,$(dpi_apk_name))
 built_dpi_apk := $(dpi_intermediate)/package.apk
+additional_certificates := $(foreach c,$(LOCAL_ADDITIONAL_CERTIFICATES), $(c).x509.pem $(c).pk8)
 
 # Set up all the target-specific variables.
 $(built_dpi_apk): PRIVATE_MODULE := $(dpi_apk_name)
@@ -16,7 +17,7 @@ $(built_dpi_apk): PRIVATE_ANDROID_MANIFEST := $(full_android_manifest)
 $(built_dpi_apk): PRIVATE_RESOURCE_DIR := $(LOCAL_RESOURCE_DIR)
 $(built_dpi_apk): PRIVATE_ASSET_DIR := $(LOCAL_ASSET_DIR)
 $(built_dpi_apk): PRIVATE_AAPT_INCLUDES := $(all_library_res_package_exports)
-ifneq (,$(filter-out current system_current, $(LOCAL_SDK_VERSION)))
+ifneq (,$(filter-out current system_current test_current, $(LOCAL_SDK_VERSION)))
 $(built_dpi_apk): PRIVATE_DEFAULT_APP_TARGET_SDK := $(LOCAL_SDK_VERSION)
 else
 $(built_dpi_apk): PRIVATE_DEFAULT_APP_TARGET_SDK := $(DEFAULT_APP_TARGET_SDK)
@@ -27,15 +28,15 @@ $(built_dpi_apk): PRIVATE_JNI_SHARED_LIBRARIES := $(jni_shared_libraries_with_ab
 $(built_dpi_apk): PRIVATE_JNI_SHARED_LIBRARIES_ABI := $(jni_shared_libraries_abis)
 $(built_dpi_apk): PRIVATE_PRIVATE_KEY := $(private_key)
 $(built_dpi_apk): PRIVATE_CERTIFICATE := $(certificate)
-$(built_dpi_apk): PRIVATE_ADDITIONAL_CERTIFICATES := $(foreach c,\
-    $(LOCAL_ADDITIONAL_CERTIFICATES), $(c).x509.pem $(c).pk8)
+$(built_dpi_apk): $(additional_certificates)
+$(built_dpi_apk): PRIVATE_ADDITIONAL_CERTIFICATES := $(additional_certificates)
 
 $(built_dpi_apk): PRIVATE_SOURCE_ARCHIVE :=
 ifneq ($(full_classes_jar),)
 $(built_dpi_apk): PRIVATE_DEX_FILE := $(built_dex)
 ifndef LOCAL_JACK_ENABLED
 # Use the jarjar processed arhive as the initial package file.
-$(built_dpi_apk): PRIVATE_SOURCE_ARCHIVE := $(full_classes_jarjar_jar)
+$(built_dpi_apk): PRIVATE_SOURCE_ARCHIVE := $(full_classes_pre_proguard_jar)
 else
 $(built_dpi_apk): PRIVATE_JACK_INTERMEDIATES_DIR := $(intermediates.COMMON)/jack-rsc
 endif # LOCAL_JACK_ENABLED
@@ -48,7 +49,7 @@ endif # full_classes_jar
 $(built_dpi_apk) : $(R_file_stamp)
 $(built_dpi_apk) : $(all_library_res_package_export_deps)
 $(built_dpi_apk) : $(private_key) $(certificate) $(SIGNAPK_JAR)
-$(built_dpi_apk) : $(AAPT) | $(ZIPALIGN)
+$(built_dpi_apk) : $(AAPT)
 $(built_dpi_apk) : $(all_res_assets) $(jni_shared_libraries) $(full_android_manifest)
 	@echo "target Package: $(PRIVATE_MODULE) ($@)"
 	$(if $(PRIVATE_SOURCE_ARCHIVE),\
@@ -68,7 +69,6 @@ ifdef LOCAL_JACK_ENABLED
 endif
 endif
 	$(sign-package)
-	$(align-package)
 
 # Set up global variables to register this apk to the higher-level dependency graph.
 ALL_MODULES += $(dpi_apk_name)

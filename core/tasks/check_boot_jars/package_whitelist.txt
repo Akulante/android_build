@@ -2,17 +2,21 @@
 # Each line is interpreted as a regular expression.
 
 ###################################################
-# core-libart.jar
+# core-libart.jar & core-oj.jar
 java\.awt\.font
 java\.beans
 java\.io
 java\.lang
 java\.lang\.annotation
+java\.lang\.invoke
 java\.lang\.ref
 java\.lang\.reflect
 java\.math
 java\.net
 java\.nio
+java\.nio\.file
+java\.nio\.file\.spi
+java\.nio\.file\.attribute
 java\.nio\.channels
 java\.nio\.channels\.spi
 java\.nio\.charset
@@ -24,14 +28,23 @@ java\.security\.interfaces
 java\.security\.spec
 java\.sql
 java\.text
+java\.text\.spi
+java\.time
+java\.time\.chrono
+java\.time\.format
+java\.time\.temporal
+java\.time\.zone
 java\.util
 java\.util\.concurrent
 java\.util\.concurrent\.atomic
 java\.util\.concurrent\.locks
+java\.util\.function
 java\.util\.jar
 java\.util\.logging
 java\.util\.prefs
 java\.util\.regex
+java\.util\.spi
+java\.util\.stream
 java\.util\.zip
 javax\.crypto
 javax\.crypto\.interfaces
@@ -54,10 +67,21 @@ javax\.xml\.transform\.sax
 javax\.xml\.transform\.stream
 javax\.xml\.validation
 javax\.xml\.xpath
-sun\.misc
+jdk\.net
 org\.w3c\.dom
 org\.w3c\.dom\.ls
 org\.w3c\.dom\.traversal
+# OpenJdk internal implementation.
+sun\.invoke\.util
+sun\.invoke\.empty
+sun\.misc
+sun\.util.*
+sun\.text.*
+sun\.security.*
+sun\.reflect.*
+sun\.nio.*
+sun\.net.*
+com\.sun\..*
 
 # TODO: Move these internal org.apache.harmony classes to libcore.*
 org\.apache\.harmony\.crypto\.internal
@@ -97,9 +121,11 @@ com\.android\..*
 
 
 ###################################################
-# core-junit.jar
+# legacy-test.jar
 junit\.extensions
 junit\.framework
+android\.test
+android\.test\.suitebuilder\.annotation
 
 
 ###################################################
@@ -176,12 +202,6 @@ javax\.microedition\.khronos\.egl
 
 android
 
-
-###################################################
-# telephony-common.jar
-com\.google\..*
-
-
 ###################################################
 # apache-xml.jar
 org\.apache\.xml\.res
@@ -212,3 +232,8 @@ org\.apache\.xalan\.extensions
 org\.apache\.xalan\.processor
 org\.apache\.xalan\.transformer
 org\.apache\.xalan\.xslt
+
+###################################################
+# Packages in the google namespace across all bootclasspath jars.
+com\.google\.android\..*
+com\.google\.vr\.platform.*

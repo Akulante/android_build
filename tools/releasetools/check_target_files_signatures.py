@@ -39,12 +39,10 @@ Usage:  check_target_file_signatures [flags] target_files
 
 """
 
-from __future__ import print_function
-
 import sys
 
 if sys.hexversion < 0x02070000:
-  print("Python 2.7 or newer is required.", file=sys.stderr)
+  print >> sys.stderr, "Python 2.7 or newer is required."
   sys.exit(1)
 
 import os
@@ -54,13 +52,6 @@ import subprocess
 import zipfile
 
 import common
-
-
-def iteritems(obj):
-  if hasattr(obj, 'iteritems'):
-    return obj.iteritems()
-  return obj.items()
-
 
 # Work around a bug in python's zipfile module that prevents opening
 # of zipfiles if any entry has an extra field of between 1 and 3 bytes
@@ -90,9 +81,9 @@ def Pop():
 
 
 def Banner(msg):
-  print("-" * 70)
-  print("  ", msg)
-  print("-" * 70)
+  print "-" * 70
+  print "  ", msg
+  print "-" * 70
 
 
 def GetCertSubject(cert):
@@ -244,17 +235,45 @@ class TargetFiles(object):
     self.certmap = None
 
   def LoadZipFile(self, filename):
-    d, z = common.UnzipTemp(filename, '*.apk')
+    # First read the APK certs file to figure out whether there are compressed
+    # APKs in the archive. If we do have compressed APKs in the archive, then we
+    # must decompress them individually before we perform any analysis.
+
+    # This is the list of wildcards of files we extract from |filename|.
+    apk_extensions = ['*.apk']
+
+    self.certmap, compressed_extension = common.ReadApkCerts(zipfile.ZipFile(filename, "r"))
+    if compressed_extension:
+      apk_extensions.append("*.apk" + compressed_extension)
+
+    d, z = common.UnzipTemp(filename, apk_extensions)
     try:
       self.apks = {}
       self.apks_by_basename = {}
       for dirpath, _, filenames in os.walk(d):
         for fn in filenames:
+          # Decompress compressed APKs before we begin processing them.
+          if compressed_extension and fn.endswith(compressed_extension):
+            # First strip the compressed extension from the file.
+            uncompressed_fn = fn[:-len(compressed_extension)]
+
+            # Decompress the compressed file to the output file.
+            common.Gunzip(os.path.join(dirpath, fn),
+                          os.path.join(dirpath, uncompressed_fn))
+
+            # Finally, delete the compressed file and use the uncompressed file
+            # for further processing. Note that the deletion is not strictly required,
+            # but is done here to ensure that we're not using too much space in
+            # the temporary directory.
+            os.remove(os.path.join(dirpath, fn))
+            fn = uncompressed_fn
+
+
           if fn.endswith(".apk"):
             fullname = os.path.join(dirpath, fn)
             displayname = fullname[len(d)+1:]
             apk = APK(fullname, displayname)
-            self.apks[apk.package] = apk
+            self.apks[apk.filename] = apk
             self.apks_by_basename[os.path.basename(apk.filename)] = apk
 
             self.max_pkg_len = max(self.max_pkg_len, len(apk.package))
@@ -262,14 +281,13 @@ class TargetFiles(object):
     finally:
       shutil.rmtree(d)
 
-    self.certmap = common.ReadApkCerts(z)
     z.close()
 
   def CheckSharedUids(self):
     """Look for any instances where packages signed with different
     certs request the same sharedUserId."""
     apks_by_uid = {}
-    for apk in self.apks.values():
+    for apk in self.apks.itervalues():
       if apk.shared_uid:
         apks_by_uid.setdefault(apk.shared_uid, []).append(apk)
 
@@ -284,15 +302,15 @@ class TargetFiles(object):
 
       AddProblem("different cert sets for packages with uid %s" % (uid,))
 
-      print("uid %s is shared by packages with different cert sets:" % uid)
+      print "uid %s is shared by packages with different cert sets:" % (uid,)
       for apk in apks:
-        print("%-*s  [%s]" % (self.max_pkg_len, apk.package, apk.filename))
+        print "%-*s  [%s]" % (self.max_pkg_len, apk.package, apk.filename)
         for cert in apk.certs:
-          print("   ", ALL_CERTS.Get(cert))
-      print()
+          print "   ", ALL_CERTS.Get(cert)
+      print
 
   def CheckExternalSignatures(self):
-    for apk_filename, certname in iteritems(self.certmap):
+    for apk_filename, certname in self.certmap.iteritems():
       if certname == "EXTERNAL":
         # Apps marked EXTERNAL should be signed with the test key
         # during development, then manually re-signed after
@@ -308,26 +326,25 @@ class TargetFiles(object):
   def PrintCerts(self):
     """Display a table of packages grouped by cert."""
     by_cert = {}
-    for apk in self.apks.values():
+    for apk in self.apks.itervalues():
       for cert in apk.certs:
         by_cert.setdefault(cert, []).append((apk.package, apk))
 
-    order = [(-len(v), k) for (k, v) in iteritems(by_cert)]
+    order = [(-len(v), k) for (k, v) in by_cert.iteritems()]
     order.sort()
 
     for _, cert in order:
-      print("%s:" % ALL_CERTS.Get(cert))
+      print "%s:" % (ALL_CERTS.Get(cert),)
       apks = by_cert[cert]
       apks.sort()
       for _, apk in apks:
         if apk.shared_uid:
-          print("  %-*s  %-*s  [%s]" % (self.max_fn_len, apk.filename,
+          print "  %-*s  %-*s  [%s]" % (self.max_fn_len, apk.filename,
                                         self.max_pkg_len, apk.package,
-                                        apk.shared_uid))
+                                        apk.shared_uid)
         else:
-          print("  %-*s  %-*s" % (self.max_fn_len, apk.filename,
-                                  self.max_pkg_len, apk.package))
-      print()
+          print "  %-*s  %s" % (self.max_fn_len, apk.filename, apk.package)
+      print
 
   def CompareWith(self, other):
     """Look for instances where a given package that exists in both
@@ -348,12 +365,12 @@ class TargetFiles(object):
             by_certpair.setdefault((other.apks[i].certs,
                                     self.apks[i].certs), []).append(i)
         else:
-          print("%s [%s]: new APK (not in comparison target_files)" % (
-              i, self.apks[i].filename))
+          print "%s [%s]: new APK (not in comparison target_files)" % (
+              i, self.apks[i].filename)
       else:
         if i in other.apks:
-          print("%s [%s]: removed APK (only in comparison target_files)" % (
-              i, other.apks[i].filename))
+          print "%s [%s]: removed APK (only in comparison target_files)" % (
+              i, other.apks[i].filename)
 
     if by_certpair:
       AddProblem("some APKs changed certs")
@@ -361,23 +378,23 @@ class TargetFiles(object):
       for (old, new), packages in sorted(by_certpair.items()):
         for i, o in enumerate(old):
           if i == 0:
-            print("was", ALL_CERTS.Get(o))
+            print "was", ALL_CERTS.Get(o)
           else:
-            print("   ", ALL_CERTS.Get(o))
+            print "   ", ALL_CERTS.Get(o)
         for i, n in enumerate(new):
           if i == 0:
-            print("now", ALL_CERTS.Get(n))
+            print "now", ALL_CERTS.Get(n)
           else:
-            print("   ", ALL_CERTS.Get(n))
+            print "   ", ALL_CERTS.Get(n)
         for i in sorted(packages):
           old_fn = other.apks[i].filename
           new_fn = self.apks[i].filename
           if old_fn == new_fn:
-            print("  %-*s  [%s]" % (max_pkg_len, i, old_fn))
+            print "  %-*s  [%s]" % (max_pkg_len, i, old_fn)
           else:
-            print("  %-*s  [was: %s; now: %s]" % (max_pkg_len, i,
-                                                  old_fn, new_fn))
-        print()
+            print "  %-*s  [was: %s; now: %s]" % (max_pkg_len, i,
+                                                  old_fn, new_fn)
+        print
 
 
 def main(argv):
@@ -432,9 +449,9 @@ def main(argv):
     target_files.CompareWith(compare_files)
 
   if PROBLEMS:
-    print("%d problem(s) found:\n" % len(PROBLEMS))
+    print "%d problem(s) found:\n" % (len(PROBLEMS),)
     for p in PROBLEMS:
-      print(p)
+      print p
     return 1
 
   return 0
@@ -445,7 +462,7 @@ if __name__ == '__main__':
     r = main(sys.argv[1:])
     sys.exit(r)
   except common.ExternalError as e:
-    print()
-    print("   ERROR: %s" % e)
-    print()
+    print
+    print "   ERROR: %s" % (e,)
+    print
     sys.exit(1)

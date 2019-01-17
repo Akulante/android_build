@@ -17,14 +17,28 @@
 ifdef ANDROID_FORCE_JACK_ENABLED
 LOCAL_JACK_ENABLED := $(ANDROID_FORCE_JACK_ENABLED)
 endif
-LOCAL_JACK_ENABLED := $(strip $(LOCAL_JACK_ENABLED))
-ifneq ($(LOCAL_JACK_ENABLED),full)
-ifneq ($(LOCAL_JACK_ENABLED),incremental)
-ifdef LOCAL_JACK_ENABLED
-ifneq ($(LOCAL_JACK_ENABLED),disabled)
-$(error $(LOCAL_PATH): invalid LOCAL_JACK_ENABLED "$(LOCAL_JACK_ENABLED)" for $(LOCAL_MODULE))
-endif
-endif
+
+ifneq ($(ANDROID_COMPILE_WITH_JACK),true)
 LOCAL_JACK_ENABLED :=
 endif
+
+LOCAL_JACK_ENABLED := $(strip $(LOCAL_JACK_ENABLED))
+LOCAL_MODULE := $(strip $(LOCAL_MODULE))
+
+valid_jack_enabled_values := full incremental javac_frontend disabled
+
+ifdef LOCAL_JACK_ENABLED
+  ifneq ($(LOCAL_JACK_ENABLED),$(filter $(firstword $(LOCAL_JACK_ENABLED)),$(valid_jack_enabled_values)))
+    $(error $(LOCAL_PATH): invalid LOCAL_JACK_ENABLED "$(LOCAL_JACK_ENABLED)" for $(LOCAL_MODULE))
+  endif
+
+  ifeq ($(LOCAL_JACK_ENABLED),disabled)
+    LOCAL_JACK_ENABLED :=
+  endif
+endif
+
+ifdef $(LOCAL_MODULE).JACK_VERSION
+LOCAL_JACK_VERSION := $($(LOCAL_MODULE).JACK_VERSION)
+else
+LOCAL_JACK_VERSION := $(JACK_DEFAULT_VERSION)
 endif

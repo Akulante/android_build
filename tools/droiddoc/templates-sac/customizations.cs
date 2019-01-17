@@ -10,7 +10,7 @@ def:sdk_nav() ?>
 <a class="totop" href="#top" data-g-event="left-nav-top">to top</a>
 
 <?cs 
-        include:"../../../../frameworks/base/docs/html/sdk/sdk_toc.cs" ?>
+        include:"../../../../../frameworks/base/docs/html/sdk/sdk_toc.cs" ?>
 
 
       </div>
@@ -25,7 +25,7 @@ def:resources_tab_nav() ?>
 <a class="totop" href="#top" data-g-event="left-nav-top">to top</a>
 
 <?cs 
-        include:"../../../../frameworks/base/docs/html/resources/resources_toc.cs" ?>
+        include:"../../../../../frameworks/base/docs/html/resources/resources_toc.cs" ?>
 
 
       </div>
@@ -43,7 +43,7 @@ def:tools_nav() ?>
       <div id="devdoc-nav" class="scroll-pane">
 <a class="totop" href="#top" data-g-event="left-nav-top">to top</a>
 <?cs 
-        include:"../../../../frameworks/base/docs/html/tools/tools_toc.cs" ?>
+        include:"../../../../../frameworks/base/docs/html/tools/tools_toc.cs" ?>
         
         
       </div>
@@ -63,7 +63,7 @@ def:training_nav() ?>
 
 
 <?cs 
-        include:"../../../../frameworks/base/docs/html/training/training_toc.cs" ?>
+        include:"../../../../../frameworks/base/docs/html/training/training_toc.cs" ?>
         
 
       </div>
@@ -83,7 +83,7 @@ def:guide_nav() ?>
 
 
 <?cs 
-        include:"../../../../frameworks/base/docs/html/guide/guide_toc.cs" ?>
+        include:"../../../../../frameworks/base/docs/html/guide/guide_toc.cs" ?>
         
 
       </div>
@@ -103,7 +103,7 @@ def:design_nav() ?>
 
 
 <?cs
-        include:"../../../../frameworks/base/docs/html/design/design_toc.cs" ?>
+        include:"../../../../../frameworks/base/docs/html/design/design_toc.cs" ?>
        
 
       </div>
@@ -122,7 +122,7 @@ def:distribute_nav() ?>
 <a class="totop" href="#top" data-g-event="left-nav-top">to top</a>
 
 <?cs
-        include:"../../../../frameworks/base/docs/html/distribute/distribute_toc.cs" ?>
+        include:"../../../../../frameworks/base/docs/html/distribute/distribute_toc.cs" ?>
         
 
       </div>
@@ -142,7 +142,7 @@ def:google_nav() ?>
 <a class="totop" href="#top" data-g-event="left-nav-top">to top</a>
 
 <?cs
-        include:"../../../../frameworks/base/docs/html/google/google_toc.cs" ?>
+        include:"../../../../../frameworks/base/docs/html/google/google_toc.cs" ?>
         
 
       </div>
@@ -166,7 +166,7 @@ def:about_nav() ?>
 <a class="totop" href="#top" data-g-event="left-nav-top">to top</a>
 
 <?cs
-        include:"../../../../frameworks/base/docs/html/about/about_toc.cs" ?>
+        include:"../../../../../frameworks/base/docs/html/about/about_toc.cs" ?>
         
 
       </div>
@@ -186,7 +186,7 @@ def:dist_more_nav() ?>
 
 
 <?cs 
-        include:"../../../../frameworks/base/docs/html/distribute/more/more_toc.cs" ?>
+        include:"../../../../../frameworks/base/docs/html/distribute/more/more_toc.cs" ?>
         
 
       </div>
@@ -355,7 +355,7 @@ def:custom_copyright() ?>
 def:custom_footerlinks() ?>
   <p>
     <a href="<?cs var:toroot ?>source/index.html">About Android</a>&nbsp;&nbsp;|&nbsp;
-    <a href="<?cs var:toroot ?>source/community/index.html">Community</a>&nbsp;&nbsp;|&nbsp;
+    <a href="<?cs var:toroot ?>source/community.html">Community</a>&nbsp;&nbsp;|&nbsp;
     <a href="<?cs var:toroot ?>legal.html">Legal</a>&nbsp;&nbsp;|&nbsp;
   </p><?cs 
 /def ?>
@@ -382,8 +382,8 @@ def:sac_left_nav() ?>
     <?cs call:compatibility_nav() ?>
   <?cs elif:source ?>
     <?cs call:source_nav() ?>
-  <?cs elif:accessories ?>
-    <?cs call:accessories_nav() ?>
+  <?cs elif:security ?>
+    <?cs call:security_nav() ?>
   <?cs elif:reference ?>
     <?cs call:default_left_nav() ?>
   <?cs /if ?>
@@ -397,7 +397,7 @@ def:devices_nav() ?>
 <a class="totop" href="#top" data-g-event="left-nav-top">to top</a>
 
 <?cs 
-        include:"../../../../docs/source.android.com/src/devices/devices_toc.cs" ?>
+        include:"../../../../../docs/source.android.com/src/devices/devices_toc.cs" ?>
 
       </div>
       <script type="text/javascript">
@@ -419,7 +419,7 @@ def:compatibility_nav() ?>
 <a class="totop" href="#top" data-g-event="left-nav-top">to top</a>
 
 <?cs 
-        include:"../../../../docs/source.android.com/src/compatibility/compatibility_toc.cs" ?>
+        include:"../../../../../docs/source.android.com/src/compatibility/compatibility_toc.cs" ?>
 
       </div>
     </div> <!-- end side-nav -->
@@ -438,7 +438,7 @@ def:source_nav() ?>
 <a class="totop" href="#top" data-g-event="left-nav-top">to top</a>
 
 <?cs 
-        include:"../../../../docs/source.android.com/src/source/source_toc.cs" ?>
+        include:"../../../../../docs/source.android.com/src/source/source_toc.cs" ?>
 
       </div>
     </div> <!-- end side-nav -->
@@ -450,14 +450,14 @@ def:source_nav() ?>
 <?cs /def ?>
 
 <?cs
-def:accessories_nav() ?>
+def:security_nav() ?>
   <div class="wrap clearfix" id="body-content">
     <div class="col-4" id="side-nav" itemscope itemtype="http://schema.org/SiteNavigationElement">
       <div id="devdoc-nav" class="scroll-pane">
 <a class="totop" href="#top" data-g-event="left-nav-top">to top</a>
 
 <?cs 
-        include:"../../../../docs/source.android.com/src/accessories/accessories_toc.cs" ?>
+        include:"../../../../../docs/source.android.com/src/security/security_toc.cs" ?>
 
       </div>
     </div> <!-- end side-nav -->

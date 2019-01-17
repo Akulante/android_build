@@ -14,7 +14,7 @@
 #
 
 # Don't bother with the cleanspecs if you are running mm/mmm
-ifeq ($(ONE_SHOT_MAKEFILE)$(dont_bother),)
+ifeq ($(ONE_SHOT_MAKEFILE)$(dont_bother)$(NO_ANDROID_CLEANSPEC),)
 
 INTERNAL_CLEAN_STEPS :=
 
@@ -54,6 +54,7 @@ endef
 # can have permission to touch it.
 include $(BUILD_SYSTEM)/cleanspec.mk
 INTERNAL_CLEAN_BUILD_VERSION := $(strip $(INTERNAL_CLEAN_BUILD_VERSION))
+INTERNAL_CLEAN_STEPS := $(strip $(INTERNAL_CLEAN_STEPS))
 
 # If the clean_steps.mk file is missing (usually after a clean build)
 # then we won't do anything.
@@ -105,189 +106,43 @@ else
   _crs_new_cmd :=
   steps :=
 endif
-CURRENT_CLEAN_BUILD_VERSION :=
-CURRENT_CLEAN_STEPS :=
 
 # Write the new state to the file.
 #
+rewrite_clean_steps_file :=
+ifneq ($(CURRENT_CLEAN_BUILD_VERSION)-$(CURRENT_CLEAN_STEPS),$(INTERNAL_CLEAN_BUILD_VERSION)-$(INTERNAL_CLEAN_STEPS))
+rewrite_clean_steps_file := true
+endif
+ifeq ($(wildcard $(clean_steps_file)),)
+# This is the first build.
+rewrite_clean_steps_file := true
+endif
+ifeq ($(rewrite_clean_steps_file),true)
 $(shell \
   mkdir -p $(dir $(clean_steps_file)) && \
   echo "CURRENT_CLEAN_BUILD_VERSION := $(INTERNAL_CLEAN_BUILD_VERSION)" > \
       $(clean_steps_file) ;\
-  echo "CURRENT_CLEAN_STEPS := $(INTERNAL_CLEAN_STEPS)" >> \
-      $(clean_steps_file) \
+  echo "CURRENT_CLEAN_STEPS := $(wordlist 1,500,$(INTERNAL_CLEAN_STEPS))" >> $(clean_steps_file) \
  )
+define -cs-write-clean-steps-if-arg1-not-empty
+$(if $(1),$(shell echo "CURRENT_CLEAN_STEPS += $(1)" >> $(clean_steps_file)))
+endef
+$(call -cs-write-clean-steps-if-arg1-not-empty,$(wordlist 501,1000,$(INTERNAL_CLEAN_STEPS)))
+$(call -cs-write-clean-steps-if-arg1-not-empty,$(wordlist 1001,1500,$(INTERNAL_CLEAN_STEPS)))
+$(call -cs-write-clean-steps-if-arg1-not-empty,$(wordlist 1501,2000,$(INTERNAL_CLEAN_STEPS)))
+$(call -cs-write-clean-steps-if-arg1-not-empty,$(wordlist 2001,2500,$(INTERNAL_CLEAN_STEPS)))
+$(call -cs-write-clean-steps-if-arg1-not-empty,$(wordlist 2501,3000,$(INTERNAL_CLEAN_STEPS)))
+$(call -cs-write-clean-steps-if-arg1-not-empty,$(wordlist 3001,99999,$(INTERNAL_CLEAN_STEPS)))
+endif
 
+CURRENT_CLEAN_BUILD_VERSION :=
+CURRENT_CLEAN_STEPS :=
 clean_steps_file :=
+rewrite_clean_steps_file :=
 INTERNAL_CLEAN_STEPS :=
 INTERNAL_CLEAN_BUILD_VERSION :=
 
-endif  # if not ONE_SHOT_MAKEFILE dont_bother
-
-# Since products and build variants (unfortunately) share the same
-# PRODUCT_OUT staging directory, things can get out of sync if different
-# build configurations are built in the same tree.  The following logic
-# will notice when the configuration has changed and remove the files
-# necessary to keep things consistent.
-
-previous_build_config_file := $(PRODUCT_OUT)/previous_build_config.mk
-
-# A change in the list of aapt configs warrants an installclean, too.
-aapt_config_list := $(strip $(PRODUCT_AAPT_CONFIG) $(PRODUCT_AAPT_PREF_CONFIG))
-
-current_build_config := \
-    $(TARGET_PRODUCT)-$(TARGET_BUILD_VARIANT)-{$(aapt_config_list)}
-aapt_config_list :=
-force_installclean := false
-
-# Read the current state from the file, if present.
-# Will set PREVIOUS_BUILD_CONFIG.
-#
-PREVIOUS_BUILD_CONFIG :=
--include $(previous_build_config_file)
-PREVIOUS_BUILD_CONFIG := $(strip $(PREVIOUS_BUILD_CONFIG))
-ifdef PREVIOUS_BUILD_CONFIG
-  ifneq "$(current_build_config)" "$(PREVIOUS_BUILD_CONFIG)"
-    $(info *** Build configuration changed: "$(PREVIOUS_BUILD_CONFIG)" -> "$(current_build_config)")
-    ifneq ($(DISABLE_AUTO_INSTALLCLEAN),true)
-      force_installclean := true
-    else
-      $(info DISABLE_AUTO_INSTALLCLEAN is set; skipping auto-clean. Your tree may be in an inconsistent state.)
-    endif
-  endif
-endif  # else, this is the first build, so no need to clean.
-PREVIOUS_BUILD_CONFIG :=
-
-# Write the new state to the file.
-#
-$(shell \
-  mkdir -p $(dir $(previous_build_config_file)) && \
-  echo "PREVIOUS_BUILD_CONFIG := $(current_build_config)" > \
-      $(previous_build_config_file) \
- )
-previous_build_config_file :=
-current_build_config :=
-
-#
-# installclean logic
-#
-
-# The files/dirs to delete during an installclean.  This includes the
-# non-common APPS directory, which may contain the wrong resources.
-#
-# Deletes all of the files that change between different build types,
-# like "make user" vs. "make sdk".  This lets you work with different
-# build types without having to do a full clean each time.  E.g.:
-#
-#     $ make -j8 all
-#     $ make installclean
-#     $ make -j8 user
-#     $ make installclean
-#     $ make -j8 sdk
-#
-installclean_files := \
-	$(HOST_OUT)/obj/NOTICE_FILES \
-	$(HOST_OUT)/sdk \
-	$(PRODUCT_OUT)/*.img \
-	$(PRODUCT_OUT)/*.ini \
-	$(PRODUCT_OUT)/*.txt \
-	$(PRODUCT_OUT)/*.xlb \
-	$(PRODUCT_OUT)/*.zip \
-	$(PRODUCT_OUT)/kernel \
-	$(PRODUCT_OUT)/*.zip.md5sum \
-	$(PRODUCT_OUT)/data \
-	$(PRODUCT_OUT)/skin \
-	$(PRODUCT_OUT)/obj/APPS \
-	$(PRODUCT_OUT)/obj/NOTICE_FILES \
-	$(PRODUCT_OUT)/obj/PACKAGING \
-	$(PRODUCT_OUT)/recovery \
-	$(PRODUCT_OUT)/root \
-	$(PRODUCT_OUT)/system \
-	$(PRODUCT_OUT)/vendor \
-	$(PRODUCT_OUT)/oem \
-	$(PRODUCT_OUT)/dex_bootjars \
-	$(PRODUCT_OUT)/obj/JAVA_LIBRARIES \
-	$(PRODUCT_OUT)/obj/FAKE \
-	$(PRODUCT_OUT)/obj/EXECUTABLES/adbd_intermediates \
-	$(PRODUCT_OUT)/obj/STATIC_LIBRARIES/libfs_mgr_intermediates \
-	$(PRODUCT_OUT)/obj/EXECUTABLES/init_intermediates \
-	$(PRODUCT_OUT)/obj/ETC/mac_permissions.xml_intermediates \
-	$(PRODUCT_OUT)/obj/ETC/sepolicy_intermediates \
-	$(PRODUCT_OUT)/obj/ETC/init.environ.rc_intermediates
-
-# The files/dirs to delete during a dataclean, which removes any files
-# in the staging and emulator data partitions.
-dataclean_files := \
-	$(PRODUCT_OUT)/data/* \
-	$(PRODUCT_OUT)/data-qemu/* \
-	$(PRODUCT_OUT)/userdata-qemu.img
-
-# make sure *_OUT is set so that we won't result in deleting random parts
-# of the filesystem.
-ifneq (2,$(words $(HOST_OUT) $(PRODUCT_OUT)))
-  $(error both HOST_OUT and PRODUCT_OUT should be set at this point.)
-endif
-
-# Define the rules for commandline invocation.
-.PHONY: dataclean
-dataclean: FILES := $(dataclean_files)
-dataclean:
-	$(hide) rm -rf $(FILES)
-	@echo -e ${CL_GRN}"Deleted emulator userdata images."${CL_RST}
-
-.PHONY: installclean
-installclean: FILES := $(installclean_files)
-installclean: dataclean
-	$(hide) rm -rf $(FILES)
-	@echo -e ${CL_GRN}"Deleted images and staging directories."${CL_RST}
-
-ifeq "$(force_installclean)" "true"
-  $(info *** Forcing "make installclean"...)
-  $(info *** rm -rf $(dataclean_files) $(installclean_files))
-  $(shell rm -rf $(dataclean_files) $(installclean_files))
-  $(info *** Done with the cleaning, now starting the real build.)
-endif
-force_installclean :=
-
-###########################################################
-# Clean build tools when swithcing between prebuilt host tools (such as in
-# apps_only build) and tools built from source (platform build).
-previous_prebuilt_tools_config_file := $(HOST_OUT)/previous_prebuilt_tools_config.mk
-ifneq (,$(TARGET_BUILD_APPS)$(filter true,$(TARGET_BUILD_PDK)))
-current_prebuilt_tools := true
-else
-current_prebuilt_tools := false
-endif
-PREVIOUS_PREBUILT_TOOLS :=
--include $(previous_prebuilt_tools_config_file)
-force_tools_clean :=
-ifdef PREVIOUS_PREBUILT_TOOLS
-ifneq ($(PREVIOUS_PREBUILT_TOOLS),$(current_prebuilt_tools))
-force_tools_clean := true
-endif
-endif # else, this is the first build, so no need to clean.
-
-# Write the new state to the file.
-$(shell \
-  mkdir -p $(dir $(previous_prebuilt_tools_config_file)) && \
-  echo "PREVIOUS_PREBUILT_TOOLS:=$(current_prebuilt_tools)" > \
-    $(previous_prebuilt_tools_config_file))
-
-ifeq ($(force_tools_clean),true)
-# For this list of prebuilt tools, see prebuilts/sdk/tools/Android.mk.
-tools_clean_files := \
-  $(HOST_OUT_COMMON_INTERMEDIATES)/JAVA_LIBRARIES/signapk_intermediates \
-  $(HOST_OUT_COMMON_INTERMEDIATES)/JAVA_LIBRARIES/dx_intermediates \
-  $(HOST_OUT_COMMON_INTERMEDIATES)/JAVA_LIBRARIES/shrinkedAndroid_intermediates \
-  $(HOST_OUT)/obj*/EXECUTABLES/aapt_intermediates \
-  $(HOST_OUT)/obj*/EXECUTABLES/aidl_intermediates \
-  $(HOST_OUT)/obj*/EXECUTABLES/zipalign_intermediates \
-  $(HOST_OUT)/obj*/lib/libc++$(HOST_SHLIB_SUFFIX) \
-
-$(info *** build type changed, clean host tools...)
-$(info *** rm -rf $(tools_clean_files))
-$(shell rm -rf $(tools_clean_files))
-endif
+endif  # if not ONE_SHOT_MAKEFILE dont_bother NO_ANDROID_CLEANSPEC
 
 ###########################################################
 
